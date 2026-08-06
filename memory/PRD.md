@@ -21,6 +21,7 @@ Commercial Hostel/PG Management System "Hostel 360" with 4 roles: Admin (platfor
 - **Visitor**: searches/filters hostels, views details, saves favorites, sends enquiry/site-visit/callback.
 
 ## Implemented (2026-06-06)
+- Multi-hostel per owner: owner can create & manage many hostels; header hostel-switcher (persisted active hostel); all owner endpoints scoped by hostel_id with ownership validation.
 - Auth: register/login/me, role routing, Google login wired, admin seed. Roles: admin/owner/tenant.
 - Public: search + filter chips (gender/sharing/query), image hostel cards, verified badge, detail (photos, room types, amenities, reviews), enquiry sheet, favorites.
 - Admin: dashboard KPIs, hostel list + verify (approve/reject/suspend/reactivate), subscription plans CRUD + toggle, owner management (activate/deactivate/block/unblock/reset password).

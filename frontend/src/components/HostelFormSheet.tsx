@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { View } from "react-native";
 import { Sheet, Field, Btn, Chip, T, Row } from "@/src/components/ui";
 import { api } from "@/src/api/client";
@@ -41,6 +41,22 @@ export function HostelFormSheet({
   const toggleAmenity = (a: string) =>
     setAmenities((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
 
+  useEffect(() => {
+    if (visible) {
+      setName(initial?.name || "");
+      setPgName(initial?.pg_name || "");
+      setOwnerName(initial?.owner_name || "");
+      setMobile(initial?.mobile || "");
+      setAddress(initial?.address || "");
+      setCity(initial?.city || "");
+      setState(initial?.state || "");
+      setArea(initial?.area || "");
+      setGmap(initial?.google_location || "");
+      setGender(initial?.gender || "pg");
+      setAmenities(initial?.amenities || ["Wi-Fi", "Food"]);
+    }
+  }, [visible, initial]);
+
   const save = async () => {
     if (!name || !ownerName || !mobile || !address || !city || !state) {
       toast.show("Fill all required fields", "error");
@@ -48,12 +64,19 @@ export function HostelFormSheet({
     }
     setSaving(true);
     try {
-      await api.post("/owner/hostel", {
-        name, pg_name: pgName, owner_name: ownerName, mobile, address, city, state,
-        area, google_location: gmap, gender, amenities, photos: initial?.photos || [],
-        sharing_types: initial?.sharing_types || [],
-      });
-      toast.show(initial ? "Hostel updated" : "Hostel submitted for verification");
+      if (initial?.id) {
+        await api.put(`/owner/hostel/${initial.id}`, {
+          name, pg_name: pgName, owner_name: ownerName, mobile, address, city, state,
+          area, google_location: gmap, gender, amenities, photos: initial?.photos || [],
+          sharing_types: initial?.sharing_types || [],
+        });
+      } else {
+        await api.post("/owner/hostel", {
+          name, pg_name: pgName, owner_name: ownerName, mobile, address, city, state,
+          area, google_location: gmap, gender, amenities, photos: [], sharing_types: [],
+        });
+      }
+      toast.show(initial?.id ? "Hostel updated" : "Hostel submitted for verification");
       onSaved();
     } catch (e: any) {
       toast.show(e.message, "error");

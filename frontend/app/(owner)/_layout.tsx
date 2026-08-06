@@ -1,9 +1,11 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, font } from "@/src/theme";
+import { OwnerHostelProvider } from "@/src/context/OwnerHostelContext";
 
 export default function OwnerLayout() {
   return (
+    <OwnerHostelProvider>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -19,5 +21,6 @@ export default function OwnerLayout() {
       <Tabs.Screen name="money" options={{ title: "Money", tabBarIcon: ({ color, size }) => <Ionicons name="wallet" color={color} size={size} /> }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: ({ color, size }) => <Ionicons name="ellipsis-horizontal-circle" color={color} size={size} /> }} />
     </Tabs>
+    </OwnerHostelProvider>
   );
 }

@@ -3,12 +3,14 @@ import { View, FlatList, Pressable } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field, Chip } from "@/src/components/ui";
+import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, type, radius } from "@/src/theme";
 
 export default function Tenants() {
   const toast = useToast();
+  const { activeId, activeHostel } = useOwnerHostel();
   const [tenants, setTenants] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,16 +31,17 @@ export default function Tenants() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (!activeId) { setLoading(false); return; }
     try {
-      const t = await api.get<{ tenants: any[] }>("/owner/tenants");
-      const r = await api.get<{ rooms: any[] }>("/owner/rooms");
+      const t = await api.get<{ tenants: any[] }>(`/owner/tenants?hostel_id=${activeId}`);
+      const r = await api.get<{ rooms: any[] }>(`/owner/rooms?hostel_id=${activeId}`);
       setTenants(t.tenants);
       setRooms(r.rooms);
     } catch {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -64,6 +67,7 @@ export default function Tenants() {
     setSaving(true);
     try {
       const res = await api.post<{ login_password?: string }>("/owner/tenants", {
+        hostel_id: activeId,
         name, mobile, email: email || undefined, room_id: roomId, bed_number: bed,
         joining_date: new Date().toISOString(), monthly_rent: parseInt(rent) || 0,
         security_deposit: parseInt(deposit) || 0, advance_amount: parseInt(advance) || 0,
@@ -112,7 +116,7 @@ export default function Tenants() {
     <Screen edges={["top"]}>
       <AppHeader
         title="Tenants"
-        subtitle={`${tenants.filter((t) => t.active).length} active`}
+        subtitle={activeHostel?.name || `${tenants.filter((t) => t.active).length} active`}
         right={
           <Pressable testID="add-tenant" onPress={() => setAddOpen(true)} hitSlop={10} style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="person-add" size={18} color="#fff" />

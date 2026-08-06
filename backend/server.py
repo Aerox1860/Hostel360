@@ -468,8 +468,17 @@ async def toggle_plan(plan_id: str, user: dict = Depends(require_roles("admin"))
 
 
 # ---------------- Owner routes ----------------
-async def get_owner_hostel(user: dict) -> Optional[dict]:
+async def get_owner_hostel(user: dict, hostel_id: Optional[str] = None) -> Optional[dict]:
+    """Resolve the hostel an owner is acting on.
+    If hostel_id is given it must belong to the owner; otherwise fall back to
+    the owner's first hostel (for backward compatibility)."""
+    if hostel_id:
+        return await db.hostels.find_one({"id": hostel_id, "owner_id": user["id"]}, {"_id": 0})
     return await db.hostels.find_one({"owner_id": user["id"]}, {"_id": 0})
+
+
+async def hostel_owned(user: dict, hostel_id: str) -> Optional[dict]:
+    return await db.hostels.find_one({"id": hostel_id, "owner_id": user["id"]}, {"_id": 0})
 
 
 class HostelBody(BaseModel):
@@ -490,19 +499,20 @@ class HostelBody(BaseModel):
     min_rent: Optional[int] = None
 
 
+@api.get("/owner/hostels")
+async def owner_list_hostels(user: dict = Depends(require_roles("owner"))):
+    hostels = await db.hostels.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    return {"hostels": hostels}
+
+
 @api.get("/owner/hostel")
-async def owner_get_hostel(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_get_hostel(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     return {"hostel": h}
 
 
 @api.post("/owner/hostel")
-async def owner_save_hostel(body: HostelBody, user: dict = Depends(require_roles("owner"))):
-    existing = await get_owner_hostel(user)
-    if existing:
-        await db.hostels.update_one({"id": existing["id"]}, {"$set": body.dict()})
-        h = await db.hostels.find_one({"id": existing["id"]}, {"_id": 0})
-        return {"hostel": h}
+async def owner_create_hostel(body: HostelBody, user: dict = Depends(require_roles("owner"))):
     doc = {
         "id": new_id(),
         "owner_id": user["id"],
@@ -518,13 +528,22 @@ async def owner_save_hostel(body: HostelBody, user: dict = Depends(require_roles
         "created_at": now_utc().isoformat(),
     }
     await db.hostels.insert_one(doc)
-    await db.users.update_one({"id": user["id"]}, {"$set": {"hostel_id": doc["id"]}})
     return {"hostel": clean(doc)}
 
 
+@api.put("/owner/hostel/{hostel_id}")
+async def owner_update_hostel(hostel_id: str, body: HostelBody, user: dict = Depends(require_roles("owner"))):
+    h = await hostel_owned(user, hostel_id)
+    if not h:
+        raise HTTPException(404, "Hostel not found")
+    await db.hostels.update_one({"id": hostel_id}, {"$set": body.dict()})
+    h2 = await db.hostels.find_one({"id": hostel_id}, {"_id": 0})
+    return {"hostel": h2}
+
+
 @api.get("/owner/dashboard")
-async def owner_dashboard(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_dashboard(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"has_hostel": False}
     hid = h["id"]
@@ -565,6 +584,7 @@ async def owner_dashboard(user: dict = Depends(require_roles("owner"))):
 
 # Rooms
 class RoomBody(BaseModel):
+    hostel_id: Optional[str] = None
     floor: str
     room_number: str
     room_type: Literal["single", "double", "triple", "dormitory"] = "double"
@@ -573,8 +593,8 @@ class RoomBody(BaseModel):
 
 
 @api.get("/owner/rooms")
-async def owner_rooms(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_rooms(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"rooms": []}
     rooms = await db.rooms.find({"hostel_id": h["id"]}, {"_id": 0}).to_list(1000)
@@ -583,7 +603,7 @@ async def owner_rooms(user: dict = Depends(require_roles("owner"))):
 
 @api.post("/owner/rooms")
 async def owner_add_room(body: RoomBody, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+    h = await get_owner_hostel(user, body.hostel_id)
     if not h:
         raise HTTPException(400, "Create your hostel first")
     beds = [{"bed_number": f"{body.room_number}-{i+1}", "status": "available", "tenant_id": None}
@@ -598,14 +618,13 @@ async def owner_add_room(body: RoomBody, user: dict = Depends(require_roles("own
 
 @api.delete("/owner/rooms/{room_id}")
 async def owner_delete_room(room_id: str, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    room = await db.rooms.find_one({"id": room_id, "hostel_id": h["id"]})
-    if not room:
+    room = await db.rooms.find_one({"id": room_id})
+    if not room or not await hostel_owned(user, room["hostel_id"]):
         raise HTTPException(404, "Room not found")
     if any(b.get("status") == "occupied" for b in room.get("beds", [])):
         raise HTTPException(400, "Room has occupied beds")
     await db.rooms.delete_one({"id": room_id})
-    await _refresh_hostel_meta(h["id"])
+    await _refresh_hostel_meta(room["hostel_id"])
     return {"ok": True}
 
 
@@ -622,6 +641,7 @@ async def _refresh_hostel_meta(hostel_id: str):
 
 # Tenants
 class TenantBody(BaseModel):
+    hostel_id: Optional[str] = None
     name: str
     mobile: str
     email: Optional[EmailStr] = None
@@ -636,8 +656,8 @@ class TenantBody(BaseModel):
 
 
 @api.get("/owner/tenants")
-async def owner_tenants(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_tenants(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"tenants": []}
     tenants = await db.tenants.find({"hostel_id": h["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
@@ -646,7 +666,7 @@ async def owner_tenants(user: dict = Depends(require_roles("owner"))):
 
 @api.post("/owner/tenants")
 async def owner_add_tenant(body: TenantBody, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+    h = await get_owner_hostel(user, body.hostel_id)
     if not h:
         raise HTTPException(400, "Create your hostel first")
     room = await db.rooms.find_one({"id": body.room_id, "hostel_id": h["id"]})
@@ -704,9 +724,8 @@ async def owner_add_tenant(body: TenantBody, user: dict = Depends(require_roles(
 
 @api.put("/owner/tenants/{tenant_id}")
 async def owner_edit_tenant(tenant_id: str, body: dict, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    t = await db.tenants.find_one({"id": tenant_id, "hostel_id": h["id"]})
-    if not t:
+    t = await db.tenants.find_one({"id": tenant_id})
+    if not t or not await hostel_owned(user, t["hostel_id"]):
         raise HTTPException(404, "Tenant not found")
     allowed = {k: body[k] for k in ("name", "mobile", "monthly_rent", "security_deposit", "advance_amount") if k in body}
     await db.tenants.update_one({"id": tenant_id}, {"$set": allowed})
@@ -721,11 +740,10 @@ class TransferBody(BaseModel):
 
 @api.post("/owner/tenants/{tenant_id}/transfer")
 async def owner_transfer_tenant(tenant_id: str, body: TransferBody, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    t = await db.tenants.find_one({"id": tenant_id, "hostel_id": h["id"]})
-    if not t:
+    t = await db.tenants.find_one({"id": tenant_id})
+    if not t or not await hostel_owned(user, t["hostel_id"]):
         raise HTTPException(404, "Tenant not found")
-    new_room = await db.rooms.find_one({"id": body.room_id, "hostel_id": h["id"]})
+    new_room = await db.rooms.find_one({"id": body.room_id, "hostel_id": t["hostel_id"]})
     if not new_room:
         raise HTTPException(404, "Room not found")
     nb = next((b for b in new_room.get("beds", []) if b["bed_number"] == body.bed_number), None)
@@ -746,9 +764,8 @@ async def owner_transfer_tenant(tenant_id: str, body: TransferBody, user: dict =
 
 @api.post("/owner/tenants/{tenant_id}/checkout")
 async def owner_checkout_tenant(tenant_id: str, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    t = await db.tenants.find_one({"id": tenant_id, "hostel_id": h["id"]})
-    if not t:
+    t = await db.tenants.find_one({"id": tenant_id})
+    if not t or not await hostel_owned(user, t["hostel_id"]):
         raise HTTPException(404, "Tenant not found")
     await db.rooms.update_one({"id": t["room_id"], "beds.bed_number": t["bed_number"]},
                               {"$set": {"beds.$.status": "available", "beds.$.tenant_id": None}})
@@ -758,9 +775,8 @@ async def owner_checkout_tenant(tenant_id: str, user: dict = Depends(require_rol
 
 @api.delete("/owner/tenants/{tenant_id}")
 async def owner_delete_tenant(tenant_id: str, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    t = await db.tenants.find_one({"id": tenant_id, "hostel_id": h["id"]})
-    if not t:
+    t = await db.tenants.find_one({"id": tenant_id})
+    if not t or not await hostel_owned(user, t["hostel_id"]):
         raise HTTPException(404, "Tenant not found")
     if t.get("active"):
         await db.rooms.update_one({"id": t["room_id"], "beds.bed_number": t["bed_number"]},
@@ -783,8 +799,8 @@ def _receipt_no() -> str:
 
 
 @api.get("/owner/rent")
-async def owner_rent(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_rent(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"payments": [], "tenants": []}
     payments = await db.payments.find({"hostel_id": h["id"]}, {"_id": 0}).sort("date", -1).to_list(5000)
@@ -794,11 +810,10 @@ async def owner_rent(user: dict = Depends(require_roles("owner"))):
 
 @api.post("/owner/rent")
 async def owner_collect_rent(body: RentBody, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    t = await db.tenants.find_one({"id": body.tenant_id, "hostel_id": h["id"]})
-    if not t:
+    t = await db.tenants.find_one({"id": body.tenant_id})
+    if not t or not await hostel_owned(user, t["hostel_id"]):
         raise HTTPException(404, "Tenant not found")
-    doc = {"id": new_id(), "hostel_id": h["id"], "tenant_id": body.tenant_id,
+    doc = {"id": new_id(), "hostel_id": t["hostel_id"], "tenant_id": body.tenant_id,
            "tenant_name": t["name"], "amount": body.amount, "type": body.type,
            "method": body.method, "note": body.note, "receipt_no": _receipt_no(),
            "status": "paid", "date": now_utc().isoformat(), "created_at": now_utc().isoformat()}
@@ -810,6 +825,7 @@ async def owner_collect_rent(body: RentBody, user: dict = Depends(require_roles(
 
 # Expenses
 class ExpenseBody(BaseModel):
+    hostel_id: Optional[str] = None
     category: Literal["electricity", "water", "internet", "gas", "staff_salary", "food", "maintenance", "repairs", "other"]
     amount: int
     note: Optional[str] = None
@@ -817,8 +833,8 @@ class ExpenseBody(BaseModel):
 
 
 @api.get("/owner/expenses")
-async def owner_get_expenses(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_get_expenses(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"expenses": []}
     expenses = await db.expenses.find({"hostel_id": h["id"]}, {"_id": 0}).sort("date", -1).to_list(5000)
@@ -827,7 +843,7 @@ async def owner_get_expenses(user: dict = Depends(require_roles("owner"))):
 
 @api.post("/owner/expenses")
 async def owner_add_expense(body: ExpenseBody, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+    h = await get_owner_hostel(user, body.hostel_id)
     if not h:
         raise HTTPException(400, "Create your hostel first")
     doc = {"id": new_id(), "hostel_id": h["id"], "category": body.category, "amount": body.amount,
@@ -838,14 +854,15 @@ async def owner_add_expense(body: ExpenseBody, user: dict = Depends(require_role
 
 @api.delete("/owner/expenses/{expense_id}")
 async def owner_delete_expense(expense_id: str, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    await db.expenses.delete_one({"id": expense_id, "hostel_id": h["id"]})
+    e = await db.expenses.find_one({"id": expense_id})
+    if e and await hostel_owned(user, e["hostel_id"]):
+        await db.expenses.delete_one({"id": expense_id})
     return {"ok": True}
 
 
 @api.get("/owner/reports")
-async def owner_reports(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_reports(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"has_hostel": False}
     payments = await db.payments.find({"hostel_id": h["id"], "status": "paid"}, {"_id": 0}).to_list(10000)
@@ -888,13 +905,14 @@ async def owner_reports(user: dict = Depends(require_roles("owner"))):
 
 # Notices & Complaints (owner)
 class NoticeBody(BaseModel):
+    hostel_id: Optional[str] = None
     title: str
     body: str
 
 
 @api.get("/owner/notices")
-async def owner_notices(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_notices(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"notices": []}
     notices = await db.notices.find({"hostel_id": h["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -903,7 +921,7 @@ async def owner_notices(user: dict = Depends(require_roles("owner"))):
 
 @api.post("/owner/notices")
 async def owner_add_notice(body: NoticeBody, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+    h = await get_owner_hostel(user, body.hostel_id)
     if not h:
         raise HTTPException(400, "Create your hostel first")
     doc = {"id": new_id(), "hostel_id": h["id"], "title": body.title, "body": body.body,
@@ -913,8 +931,8 @@ async def owner_add_notice(body: NoticeBody, user: dict = Depends(require_roles(
 
 
 @api.get("/owner/complaints")
-async def owner_complaints(user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
+async def owner_complaints(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
     if not h:
         return {"complaints": [], "requests": []}
     complaints = await db.complaints.find({"hostel_id": h["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -924,17 +942,18 @@ async def owner_complaints(user: dict = Depends(require_roles("owner"))):
 
 @api.post("/owner/complaints/{complaint_id}/resolve")
 async def owner_resolve_complaint(complaint_id: str, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    await db.complaints.update_one({"id": complaint_id, "hostel_id": h["id"]},
-                                   {"$set": {"status": "resolved", "resolved_at": now_utc().isoformat()}})
+    c = await db.complaints.find_one({"id": complaint_id})
+    if c and await hostel_owned(user, c["hostel_id"]):
+        await db.complaints.update_one({"id": complaint_id},
+                                       {"$set": {"status": "resolved", "resolved_at": now_utc().isoformat()}})
     return {"ok": True}
 
 
 @api.post("/owner/requests/{request_id}/resolve")
 async def owner_resolve_request(request_id: str, user: dict = Depends(require_roles("owner"))):
-    h = await get_owner_hostel(user)
-    await db.requests.update_one({"id": request_id, "hostel_id": h["id"]},
-                                 {"$set": {"status": "resolved"}})
+    r = await db.requests.find_one({"id": request_id})
+    if r and await hostel_owned(user, r["hostel_id"]):
+        await db.requests.update_one({"id": request_id}, {"$set": {"status": "resolved"}})
     return {"ok": True}
 
 
@@ -1024,6 +1043,7 @@ async def tenant_add_request(body: RequestBody, user: dict = Depends(require_rol
 # ---------------- Payments (Stripe) ----------------
 class SubCheckoutBody(BaseModel):
     plan_id: str
+    hostel_id: Optional[str] = None
 
 
 class RentCheckoutBody(BaseModel):
@@ -1071,7 +1091,7 @@ async def sub_checkout(body: SubCheckoutBody, user: dict = Depends(require_roles
     plan = await db.plans.find_one({"id": body.plan_id, "active": True}, {"_id": 0})
     if not plan:
         raise HTTPException(404, "Plan not available")
-    h = await get_owner_hostel(user)
+    h = await get_owner_hostel(user, body.hostel_id)
     if not h:
         raise HTTPException(400, "Create your hostel first")
     meta = {"kind": "subscription", "plan_id": plan["id"], "owner_id": user["id"],

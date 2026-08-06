@@ -3,6 +3,7 @@ import { View, FlatList, Pressable } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field, Chip } from "@/src/components/ui";
+import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, type, radius } from "@/src/theme";
@@ -16,6 +17,7 @@ const TYPES = [
 
 export default function Rooms() {
   const toast = useToast();
+  const { activeId, activeHostel } = useOwnerHostel();
   const [rooms, setRooms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -27,14 +29,15 @@ export default function Rooms() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (!activeId) { setLoading(false); return; }
     try {
-      const { rooms } = await api.get<{ rooms: any[] }>("/owner/rooms");
+      const { rooms } = await api.get<{ rooms: any[] }>(`/owner/rooms?hostel_id=${activeId}`);
       setRooms(rooms);
     } catch {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -51,6 +54,7 @@ export default function Rooms() {
     setSaving(true);
     try {
       await api.post("/owner/rooms", {
+        hostel_id: activeId,
         floor, room_number: roomNo, room_type: rtype,
         rent: parseInt(rent) || 0, bed_count: parseInt(beds) || 1,
       });
@@ -81,7 +85,7 @@ export default function Rooms() {
     <Screen edges={["top"]}>
       <AppHeader
         title="Rooms & Beds"
-        subtitle={`${rooms.length} rooms`}
+        subtitle={activeHostel?.name || `${rooms.length} rooms`}
         right={
           <Pressable testID="add-room" onPress={() => setOpen(true)} hitSlop={10} style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" }}>
             <Ionicons name="add" size={22} color="#fff" />

@@ -4,6 +4,7 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field } from "@/src/components/ui";
 import { HostelFormSheet } from "@/src/components/HostelFormSheet";
+import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { api, BACKEND_URL } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
@@ -13,6 +14,7 @@ import * as WebBrowser from "expo-web-browser";
 export default function More() {
   const { logout } = useAuth();
   const toast = useToast();
+  const { activeId, activeHostel, refresh: refreshHostels } = useOwnerHostel();
   const [reports, setReports] = useState<any>(null);
   const [hostel, setHostel] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -34,48 +36,49 @@ export default function More() {
   const [plans, setPlans] = useState<any[]>([]);
 
   const load = useCallback(async () => {
+    if (!activeId) { setLoading(false); return; }
     try {
-      const r = await api.get("/owner/reports");
-      const { hostel } = await api.get<{ hostel: any }>("/owner/hostel");
+      const r = await api.get(`/owner/reports?hostel_id=${activeId}`);
+      const { hostel } = await api.get<{ hostel: any }>(`/owner/hostel?hostel_id=${activeId}`);
       setReports(r);
       setHostel(hostel);
     } catch {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const openNotices = async () => {
-    const { notices } = await api.get<{ notices: any[] }>("/owner/notices");
+    const { notices } = await api.get<{ notices: any[] }>(`/owner/notices?hostel_id=${activeId}`);
     setNotices(notices);
     setNoticesOpen(true);
   };
   const postNotice = async () => {
     if (!nTitle || !nBody) { toast.show("Enter title and message", "error"); return; }
     try {
-      await api.post("/owner/notices", { title: nTitle, body: nBody });
+      await api.post("/owner/notices", { hostel_id: activeId, title: nTitle, body: nBody });
       toast.show("Notice posted");
       setNTitle(""); setNBody("");
-      const { notices } = await api.get<{ notices: any[] }>("/owner/notices");
+      const { notices } = await api.get<{ notices: any[] }>(`/owner/notices?hostel_id=${activeId}`);
       setNotices(notices);
     } catch (e: any) { toast.show(e.message, "error"); }
   };
   const openComplaints = async () => {
-    const d = await api.get<{ complaints: any[]; requests: any[] }>("/owner/complaints");
+    const d = await api.get<{ complaints: any[]; requests: any[] }>(`/owner/complaints?hostel_id=${activeId}`);
     setComplaints(d.complaints); setRequests(d.requests);
     setComplaintsOpen(true);
   };
   const resolveComplaint = async (id: string) => {
     await api.post(`/owner/complaints/${id}/resolve`);
-    const d = await api.get<{ complaints: any[]; requests: any[] }>("/owner/complaints");
+    const d = await api.get<{ complaints: any[]; requests: any[] }>(`/owner/complaints?hostel_id=${activeId}`);
     setComplaints(d.complaints); setRequests(d.requests);
     toast.show("Marked resolved");
   };
   const resolveRequest = async (id: string) => {
     await api.post(`/owner/requests/${id}/resolve`);
-    const d = await api.get<{ complaints: any[]; requests: any[] }>("/owner/complaints");
+    const d = await api.get<{ complaints: any[]; requests: any[] }>(`/owner/complaints?hostel_id=${activeId}`);
     setComplaints(d.complaints); setRequests(d.requests);
     toast.show("Request handled");
   };
@@ -91,7 +94,7 @@ export default function More() {
   };
   const buyPlan = async (planId: string) => {
     try {
-      const res = await api.post<{ url: string }>("/payments/subscription/checkout", { plan_id: planId });
+      const res = await api.post<{ url: string }>("/payments/subscription/checkout", { plan_id: planId, hostel_id: activeId });
       setPlanOpen(false);
       await WebBrowser.openBrowserAsync(res.url);
     } catch (e: any) {
@@ -118,7 +121,7 @@ export default function More() {
 
   return (
     <Screen edges={["top"]}>
-      <AppHeader title="More" subtitle="Reports, notices & settings" />
+      <AppHeader title="More" subtitle={activeHostel?.name || "Reports, notices & settings"} />
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing["3xl"] }}>
         {/* Reports */}
         {reports?.has_hostel ? (
@@ -239,7 +242,7 @@ export default function More() {
         ))}
       </Sheet>
 
-      <HostelFormSheet visible={editOpen} onClose={() => setEditOpen(false)} initial={hostel} onSaved={() => { setEditOpen(false); load(); }} />
+      <HostelFormSheet visible={editOpen} onClose={() => setEditOpen(false)} initial={hostel} onSaved={async () => { setEditOpen(false); await refreshHostels(); load(); }} />
     </Screen>
   );
 }

@@ -2,52 +2,58 @@ import { useCallback, useState } from "react";
 import { View, ScrollView, RefreshControl, Pressable } from "react-native";
 import { useFocusEffect, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, AppHeader, T, StatCard, Card, Row, LoadingView, Btn, EmptyState } from "@/src/components/ui";
+import { Screen, AppHeader, T, StatCard, Card, Row, LoadingView, Btn, EmptyState, Badge } from "@/src/components/ui";
 import { HostelFormSheet } from "@/src/components/HostelFormSheet";
+import { HostelSwitcher } from "@/src/components/HostelSwitcher";
+import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, spacing, radius, type } from "@/src/theme";
 
 export default function OwnerDashboard() {
   const { user, logout } = useAuth();
+  const { hostels, activeId, activeHostel, loading: hLoading, refresh } = useOwnerHostel();
   const [data, setData] = useState<any>(null);
-  const [hostel, setHostel] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
 
   const load = useCallback(async () => {
+    if (!activeId) {
+      setLoading(false);
+      return;
+    }
     try {
-      const d = await api.get("/owner/dashboard");
+      const d = await api.get(`/owner/dashboard?hostel_id=${activeId}`);
       setData(d);
-      const { hostel } = await api.get<{ hostel: any }>("/owner/hostel");
-      setHostel(hostel);
     } catch {
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [activeId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  if (loading) return <Screen><LoadingView /></Screen>;
+  if (hLoading) return <Screen><LoadingView /></Screen>;
 
-  if (!data?.has_hostel) {
+  if (hostels.length === 0) {
     return (
       <Screen edges={["top"]}>
         <AppHeader title="Get started" subtitle={`Hi, ${user?.name || "Owner"}`} right={<LogoutBtn onPress={logout} />} />
         <EmptyState
           icon="business-outline"
           title="Add your first hostel"
-          subtitle="Create your property to start managing rooms, tenants, rent and more."
+          subtitle="Create your property to start managing rooms, tenants, rent and more. You can add multiple hostels."
           ctaLabel="Add Property"
           onCta={() => setFormOpen(true)}
         />
-        <HostelFormSheet visible={formOpen} onClose={() => setFormOpen(false)} initial={null} onSaved={() => { setFormOpen(false); load(); }} />
+        <HostelFormSheet visible={formOpen} onClose={() => setFormOpen(false)} initial={null} onSaved={async () => { setFormOpen(false); await refresh(); }} />
       </Screen>
     );
   }
+
+  if (!data) return <Screen><LoadingView /></Screen>;
 
   const QuickAction = ({ icon, label, to }: { icon: any; label: string; to: string }) => (
     <Pressable testID={`qa-${label}`} onPress={() => router.push(to as any)} style={styles.qa}>
@@ -59,15 +65,20 @@ export default function OwnerDashboard() {
   return (
     <Screen edges={["top"]}>
       <AppHeader
-        title={hostel?.name || "My Hostel"}
-        subtitle={data.hostel_status === "approved" ? "Approved & Live" : `Status: ${data.hostel_status}`}
+        title="Dashboard"
+        subtitle={`Hi, ${user?.name || "Owner"}`}
         right={<LogoutBtn onPress={logout} />}
       />
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: spacing["3xl"] }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.brand} />}
       >
-        {data.hostel_status !== "approved" ? (
+        <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <HostelSwitcher />
+          {data ? <Badge label={data.hostel_status === "approved" ? "Live" : data.hostel_status} tone={data.hostel_status === "approved" ? "success" : "warning"} /> : null}
+        </Row>
+
+        {data && data.hostel_status !== "approved" ? (
           <Card style={{ backgroundColor: colors.brandTertiary, borderColor: colors.brandSecondary }}>
             <Row style={{ gap: spacing.sm }}>
               <Ionicons name="time" size={20} color={colors.warning} />

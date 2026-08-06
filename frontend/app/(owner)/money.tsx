@@ -3,6 +3,7 @@ import { View, ScrollView, Pressable, FlatList } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field, Chip } from "@/src/components/ui";
+import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, type, radius } from "@/src/theme";
@@ -21,6 +22,7 @@ const EXP_CATS = [
 
 export default function Money() {
   const toast = useToast();
+  const { activeId, activeHostel } = useOwnerHostel();
   const [tab, setTab] = useState<"rent" | "expenses">("rent");
   const [payments, setPayments] = useState<any[]>([]);
   const [tenants, setTenants] = useState<any[]>([]);
@@ -40,9 +42,10 @@ export default function Money() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (!activeId) { setLoading(false); return; }
     try {
-      const r = await api.get<{ payments: any[]; tenants: any[] }>("/owner/rent");
-      const e = await api.get<{ expenses: any[] }>("/owner/expenses");
+      const r = await api.get<{ payments: any[]; tenants: any[] }>(`/owner/rent?hostel_id=${activeId}`);
+      const e = await api.get<{ expenses: any[] }>(`/owner/expenses?hostel_id=${activeId}`);
       setPayments(r.payments);
       setTenants(r.tenants);
       setExpenses(e.expenses);
@@ -50,7 +53,7 @@ export default function Money() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -78,7 +81,7 @@ export default function Money() {
     if (!expAmt) { toast.show("Enter amount", "error"); return; }
     setSaving(true);
     try {
-      await api.post("/owner/expenses", { category: cat, amount: parseInt(expAmt) || 0, note: expNote, date: new Date().toISOString() });
+      await api.post("/owner/expenses", { hostel_id: activeId, category: cat, amount: parseInt(expAmt) || 0, note: expNote, date: new Date().toISOString() });
       toast.show("Expense added");
       setExpOpen(false);
       setExpAmt(""); setExpNote(""); setCat("electricity");
@@ -95,7 +98,7 @@ export default function Money() {
 
   return (
     <Screen edges={["top"]}>
-      <AppHeader title="Money" subtitle="Rent & expenses" />
+      <AppHeader title="Money" subtitle={activeHostel?.name || "Rent & expenses"} />
       {/* Segmented */}
       <View style={styles.segment}>
         {(["rent", "expenses"] as const).map((t) => (
