@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { View } from "react-native";
 import { Sheet, Field, Btn, Chip, T, Row } from "@/src/components/ui";
+import { PhotoPicker } from "@/src/components/PhotoPicker";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, type } from "@/src/theme";
@@ -36,6 +37,7 @@ export function HostelFormSheet({
   const [gmap, setGmap] = useState(initial?.google_location || "");
   const [gender, setGender] = useState(initial?.gender || "pg");
   const [amenities, setAmenities] = useState<string[]>(initial?.amenities || ["Wi-Fi", "Food"]);
+  const [photos, setPhotos] = useState<string[]>(initial?.photos || []);
   const [saving, setSaving] = useState(false);
 
   const toggleAmenity = (a: string) =>
@@ -54,6 +56,7 @@ export function HostelFormSheet({
       setGmap(initial?.google_location || "");
       setGender(initial?.gender || "pg");
       setAmenities(initial?.amenities || ["Wi-Fi", "Food"]);
+      setPhotos(initial?.photos || []);
     }
   }, [visible, initial]);
 
@@ -67,13 +70,13 @@ export function HostelFormSheet({
       if (initial?.id) {
         await api.put(`/owner/hostel/${initial.id}`, {
           name, pg_name: pgName, owner_name: ownerName, mobile, address, city, state,
-          area, google_location: gmap, gender, amenities, photos: initial?.photos || [],
+          area, google_location: gmap, gender, amenities, photos,
           sharing_types: initial?.sharing_types || [],
         });
       } else {
         await api.post("/owner/hostel", {
           name, pg_name: pgName, owner_name: ownerName, mobile, address, city, state,
-          area, google_location: gmap, gender, amenities, photos: [], sharing_types: [],
+          area, google_location: gmap, gender, amenities, photos, sharing_types: [],
         });
       }
       toast.show(initial?.id ? "Hostel updated" : "Hostel submitted for verification");
@@ -112,6 +115,8 @@ export function HostelFormSheet({
           <Chip key={a} label={a} active={amenities.includes(a)} onPress={() => toggleAmenity(a)} testID={`h-amenity-${a}`} />
         ))}
       </Row>
+
+      <PhotoPicker photos={photos} onChange={setPhotos} testID="hostel-photos" />
 
       <Btn title={initial ? "Save Changes" : "Submit for Verification"} onPress={save} loading={saving} testID="h-save" />
     </Sheet>

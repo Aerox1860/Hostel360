@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.pgmanager.yjnx0r"
+      "bundleIdentifier": "com.emergent.pgmanager.yjnx0r",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Upload photos to showcase your hostel"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +21,8 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.pgmanager.yjnx0r"
+      "package": "com.emergent.pgmanager.yjnx0r",
+      "permissions": ["READ_MEDIA_IMAGES"]
     },
     "web": {
       "bundler": "metro",
@@ -27,6 +31,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-image-picker",
       [
         "expo-splash-screen",
         {

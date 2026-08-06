@@ -14,6 +14,7 @@ export default function OwnerDashboard() {
   const { user, logout } = useAuth();
   const { hostels, activeId, activeHostel, loading: hLoading, refresh } = useOwnerHostel();
   const [data, setData] = useState<any>(null);
+  const [portfolio, setPortfolio] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -26,6 +27,8 @@ export default function OwnerDashboard() {
     try {
       const d = await api.get(`/owner/dashboard?hostel_id=${activeId}`);
       setData(d);
+      const p = await api.get("/owner/portfolio");
+      setPortfolio(p);
     } catch {
     } finally {
       setLoading(false);
@@ -77,6 +80,33 @@ export default function OwnerDashboard() {
           <HostelSwitcher />
           {data ? <Badge label={data.hostel_status === "approved" ? "Live" : data.hostel_status} tone={data.hostel_status === "approved" ? "success" : "warning"} /> : null}
         </Row>
+
+        {portfolio && portfolio.total_hostels > 1 ? (
+          <Card style={{ backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse, gap: spacing.md }}>
+            <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <Row style={{ gap: 6 }}>
+                <Ionicons name="albums" size={18} color={colors.onBrandPrimary} />
+                <T weight="extrabold" size={type.lg} color={colors.onBrandPrimary}>All Properties</T>
+              </Row>
+              <T size={type.sm} color="rgba(255,255,255,0.7)">{portfolio.total_hostels} hostels</T>
+            </Row>
+            <Row style={{ justifyContent: "space-between" }}>
+              <PortStat label="Net Profit" value={`₹${portfolio.net_profit}`} />
+              <PortStat label="Occupancy" value={`${portfolio.occupancy_pct}%`} />
+              <PortStat label="Tenants" value={portfolio.total_tenants} />
+              <PortStat label="Beds" value={portfolio.total_beds} />
+            </Row>
+            <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.12)" }} />
+            <Row style={{ justifyContent: "space-between" }}>
+              <T size={type.sm} color="rgba(255,255,255,0.7)">
+                Collected ₹{portfolio.total_collection} · Spent ₹{portfolio.total_expenses}
+              </T>
+              {portfolio.pending_hostels ? (
+                <T size={type.sm} weight="bold" color={colors.warning}>{portfolio.pending_hostels} pending approval</T>
+              ) : null}
+            </Row>
+          </Card>
+        ) : null}
 
         {data && data.hostel_status !== "approved" ? (
           <Card style={{ backgroundColor: colors.brandTertiary, borderColor: colors.brandSecondary }}>
@@ -130,6 +160,15 @@ export default function OwnerDashboard() {
         </Row>
       </ScrollView>
     </Screen>
+  );
+}
+
+function PortStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <View style={{ alignItems: "flex-start" }}>
+      <T weight="extrabold" size={type.lg} color={colors.onBrandPrimary}>{value}</T>
+      <T size={11} color="rgba(255,255,255,0.7)">{label}</T>
+    </View>
   );
 }
 

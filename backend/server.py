@@ -505,6 +505,45 @@ async def owner_list_hostels(user: dict = Depends(require_roles("owner"))):
     return {"hostels": hostels}
 
 
+@api.get("/owner/portfolio")
+async def owner_portfolio(user: dict = Depends(require_roles("owner"))):
+    hostels = await db.hostels.find({"owner_id": user["id"]}, {"_id": 0}).to_list(200)
+    hids = [h["id"] for h in hostels]
+    rooms = await db.rooms.find({"hostel_id": {"$in": hids}}, {"_id": 0}).to_list(5000)
+    tenants = await db.tenants.find({"hostel_id": {"$in": hids}, "active": True}, {"_id": 0}).to_list(5000)
+    payments = await db.payments.find({"hostel_id": {"$in": hids}, "status": "paid"}, {"_id": 0}).to_list(20000)
+    expenses = await db.expenses.find({"hostel_id": {"$in": hids}}, {"_id": 0}).to_list(20000)
+    total_beds = sum(len(r.get("beds", [])) for r in rooms)
+    occupied = sum(1 for r in rooms for b in r.get("beds", []) if b.get("status") == "occupied")
+    total_collection = sum(p.get("amount", 0) for p in payments)
+    total_expenses = sum(e.get("amount", 0) for e in expenses)
+    per_hostel = []
+    for h in hostels:
+        hr = [r for r in rooms if r["hostel_id"] == h["id"]]
+        hb = sum(len(r.get("beds", [])) for r in hr)
+        ho = sum(1 for r in hr for b in r.get("beds", []) if b.get("status") == "occupied")
+        per_hostel.append({
+            "id": h["id"], "name": h["name"], "status": h.get("status"),
+            "beds": hb, "occupied": ho,
+            "tenants": len([t for t in tenants if t["hostel_id"] == h["id"]]),
+            "occupancy_pct": round((ho / hb * 100), 0) if hb else 0,
+        })
+    return {
+        "total_hostels": len(hostels),
+        "approved_hostels": len([h for h in hostels if h.get("status") == "approved"]),
+        "pending_hostels": len([h for h in hostels if h.get("status") == "pending"]),
+        "total_beds": total_beds,
+        "occupied_beds": occupied,
+        "available_beds": total_beds - occupied,
+        "total_tenants": len(tenants),
+        "total_collection": round(total_collection, 2),
+        "total_expenses": round(total_expenses, 2),
+        "net_profit": round(total_collection - total_expenses, 2),
+        "occupancy_pct": round((occupied / total_beds * 100), 0) if total_beds else 0,
+        "per_hostel": per_hostel,
+    }
+
+
 @api.get("/owner/hostel")
 async def owner_get_hostel(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
     h = await get_owner_hostel(user, hostel_id)
