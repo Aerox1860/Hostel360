@@ -99,3 +99,111 @@ export async function downloadInvoice(sub: InvoiceData, ownerName: string, hoste
   }
   return { ok: true, uri };
 }
+
+async function outputPdf(html: string, title: string) {
+  if (Platform.OS === "web") {
+    const w = typeof window !== "undefined" ? window.open("", "_blank") : null;
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => { try { w.print(); } catch {} }, 600);
+      return { ok: true };
+    }
+    return { ok: false, error: "Popup blocked. Allow popups to download." };
+  }
+  const { uri } = await Print.printToFileAsync({ html });
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: title, UTI: "com.adobe.pdf" });
+  }
+  return { ok: true, uri };
+}
+
+export interface ReceiptData {
+  receipt_no?: string;
+  date?: string;
+  amount?: number;
+  type?: string;
+  method?: string;
+  advance_amount?: number;
+  security_deposit?: number;
+  tenant_name?: string;
+  room_number?: string;
+  bed_number?: string;
+  pg_name?: string;
+  address?: string;
+  contact?: string;
+  owner_name?: string;
+}
+
+function monthYear(s?: string) {
+  if (!s) return "-";
+  try {
+    return new Date(s).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  } catch {
+    return s;
+  }
+}
+
+function buildReceiptHtml(r: ReceiptData) {
+  const advRow = r.advance_amount
+    ? `<tr><td>Advance Amount</td><td style="text-align:right;">&#8377;${r.advance_amount}</td></tr>`
+    : "";
+  const depRow = r.security_deposit
+    ? `<tr><td>Security Deposit</td><td style="text-align:right;">&#8377;${r.security_deposit}</td></tr>`
+    : "";
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body{font-family:-apple-system,Helvetica,Arial,sans-serif;color:#1A1D1A;padding:32px;background:#fff;}
+    .head{text-align:center;border-bottom:3px solid #2C5E3E;padding-bottom:16px;}
+    .pg{font-size:24px;font-weight:800;color:#2C5E3E;}
+    .muted{color:#6A706A;font-size:13px;}
+    .title{text-align:center;margin:22px 0 6px;font-size:16px;font-weight:800;letter-spacing:2px;color:#1A1D1A;}
+    .meta{display:flex;justify-content:space-between;font-size:13px;color:#6A706A;margin-top:8px;}
+    .line{margin-top:20px;font-size:15px;}
+    .line b{color:#1A1D1A;}
+    table{width:100%;border-collapse:collapse;margin-top:20px;}
+    td{padding:12px 8px;border-bottom:1px solid #E5E7E5;font-size:14px;}
+    .total td{border-top:2px solid #2C5E3E;border-bottom:none;font-size:18px;font-weight:800;color:#2C5E3E;padding-top:14px;}
+    .sign{margin-top:60px;display:flex;justify-content:flex-end;}
+    .sign .box{text-align:center;}
+    .sign .name{font-family:'Segoe Script','Brush Script MT',cursive;font-size:22px;color:#2C5E3E;border-bottom:1px solid #1A1D1A;padding:0 24px 4px;}
+    .sign .lbl{font-size:12px;color:#6A706A;margin-top:6px;}
+    .badge{display:inline-block;background:#DCFCE7;color:#166534;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;}
+    .footer{margin-top:36px;border-top:1px solid #E5E7E5;padding-top:14px;font-size:12px;color:#6A706A;text-align:center;}
+  </style></head><body>
+    <div class="head">
+      <div class="pg">${r.pg_name || "Hostel"}</div>
+      <div class="muted">${r.address || ""}</div>
+      <div class="muted">Contact: ${r.contact || "-"}</div>
+    </div>
+    <div class="title">RENT RECEIPT</div>
+    <div style="text-align:center;"><span class="badge">PAID</span></div>
+    <div class="meta"><span>Receipt No: <b>${r.receipt_no || "-"}</b></span><span>Date: ${fdate(r.date)}</span></div>
+
+    <div class="line">Received with thanks from <b>${r.tenant_name || "Tenant"}</b>${r.room_number ? ` (Room ${r.room_number}${r.bed_number ? `, Bed ${r.bed_number}` : ""})` : ""}</div>
+    <div class="line">For the month of <b>${monthYear(r.date)}</b> towards <b>${(r.type || "rent").toUpperCase()}</b>, paid via <b>${(r.method || "cash").toUpperCase()}</b>.</div>
+
+    <table>
+      <tr><td>${(r.type || "Rent")[0].toUpperCase()}${(r.type || "rent").slice(1)} Amount</td><td style="text-align:right;">&#8377;${r.amount ?? 0}</td></tr>
+      ${advRow}
+      ${depRow}
+      <tr class="total"><td>Total Received</td><td style="text-align:right;">&#8377;${r.amount ?? 0}</td></tr>
+    </table>
+
+    <div class="sign">
+      <div class="box">
+        <div class="name">${r.owner_name || "Owner"}</div>
+        <div class="lbl">For ${r.pg_name || "Hostel"} · Authorised Signatory</div>
+      </div>
+    </div>
+
+    <div class="footer">This is a system-generated rent receipt from Hostel 360.</div>
+  </body></html>`;
+}
+
+export async function downloadReceipt(r: ReceiptData) {
+  const html = buildReceiptHtml(r);
+  return outputPdf(html, "Rent Receipt");
+}

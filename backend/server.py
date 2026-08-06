@@ -1058,9 +1058,10 @@ async def tenant_home(user: dict = Depends(require_roles("tenant"))):
 async def tenant_payments(user: dict = Depends(require_roles("tenant"))):
     t = await _tenant_record(user)
     if not t:
-        return {"payments": []}
+        return {"payments": [], "hostel": None, "tenant": None}
     payments = await db.payments.find({"tenant_id": t["id"]}, {"_id": 0}).sort("date", -1).to_list(1000)
-    return {"payments": payments}
+    hostel = await db.hostels.find_one({"id": t["hostel_id"]}, {"_id": 0})
+    return {"payments": payments, "hostel": hostel, "tenant": t}
 
 
 @api.get("/tenant/notices")

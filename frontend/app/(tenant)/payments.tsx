@@ -2,20 +2,25 @@ import { useCallback, useState } from "react";
 import { View, FlatList } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState } from "@/src/components/ui";
+import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Btn } from "@/src/components/ui";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
+import { downloadReceipt } from "@/src/utils/invoice";
 import { colors, spacing, type, radius } from "@/src/theme";
 
 export default function TenantPayments() {
   const toast = useToast();
   const [payments, setPayments] = useState<any[]>([]);
+  const [hostel, setHostel] = useState<any>(null);
+  const [tenant, setTenant] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const { payments } = await api.get<{ payments: any[] }>("/tenant/payments");
-      setPayments(payments);
+      const d = await api.get<{ payments: any[]; hostel: any; tenant: any }>("/tenant/payments");
+      setPayments(d.payments);
+      setHostel(d.hostel);
+      setTenant(d.tenant);
     } catch {
     } finally {
       setLoading(false);
@@ -23,6 +28,30 @@ export default function TenantPayments() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const getReceipt = async (p: any) => {
+    try {
+      const res = await downloadReceipt({
+        receipt_no: p.receipt_no,
+        date: p.date,
+        amount: p.amount,
+        type: p.type,
+        method: p.method,
+        advance_amount: p.type === "rent" ? tenant?.advance_amount : undefined,
+        tenant_name: tenant?.name,
+        room_number: tenant?.room_number,
+        bed_number: tenant?.bed_number,
+        pg_name: hostel?.pg_name || hostel?.name,
+        address: hostel?.address ? `${hostel.address}, ${hostel.city || ""}` : hostel?.city,
+        contact: hostel?.mobile,
+        owner_name: hostel?.owner_name,
+      });
+      if (res && res.ok === false) toast.show(res.error || "Could not open receipt", "error");
+      else if (typeof window === "undefined") toast.show("Receipt ready to save/share", "success");
+    } catch {
+      toast.show("Could not generate receipt", "error");
+    }
+  };
 
   const total = payments.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0);
 
@@ -60,6 +89,7 @@ export default function TenantPayments() {
               <T size={type.sm} color={colors.onSurfaceSecondary}>Receipt: {item.receipt_no}</T>
               <Badge label="Paid" tone="success" />
             </Row>
+            <Btn title="Download Receipt" variant="secondary" icon="download" onPress={() => getReceipt(item)} testID={`receipt-${item.id}`} />
           </Card>
         )}
       />
