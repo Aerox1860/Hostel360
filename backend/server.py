@@ -1172,9 +1172,11 @@ async def _activate_subscription(hostel: dict, months: int, amount: float, metho
     base = current_expiry if (current_expiry and current_expiry > now) else now
     end = add_months(base, months)
     plan_name = {1: "Monthly", 3: "3-Month", 6: "6-Month", 12: "12-Month"}.get(months, f"{months}-Month") + " Plan"
+    invoice_no = "INV-" + now.strftime("%y%m") + "-" + new_id()[:6].upper()
     await db.subscriptions.insert_one({
         "id": new_id(), "owner_id": owner_id, "hostel_id": hostel["id"],
         "plan_name": plan_name, "months": months, "amount": amount, "method": method,
+        "invoice_no": invoice_no, "hostel_name": hostel.get("name"),
         "status": "active", "start": now.isoformat(), "end": end.isoformat(),
         "created_at": now.isoformat(),
     })

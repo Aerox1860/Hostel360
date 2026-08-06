@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { View, ScrollView, Pressable } from "react-native";
+import { View, ScrollView, Pressable, Platform } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field } from "@/src/components/ui";
@@ -9,11 +9,12 @@ import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { api, BACKEND_URL } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
+import { downloadInvoice } from "@/src/utils/invoice";
 import { colors, spacing, type, radius } from "@/src/theme";
 import * as WebBrowser from "expo-web-browser";
 
 export default function More() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const toast = useToast();
   const { activeId, activeHostel, refresh: refreshHostels } = useOwnerHostel();
   const [reports, setReports] = useState<any>(null);
@@ -124,6 +125,15 @@ export default function More() {
       toast.show(e.message || "Online payments not configured yet", "error");
     } finally {
       setBuying(null);
+    }
+  };
+  const getInvoice = async (item: any) => {
+    try {
+      const res = await downloadInvoice(item, user?.name || "", sub?.hostel_name || activeHostel?.name || "");
+      if (res && res.ok === false) toast.show(res.error || "Could not open invoice", "error");
+      else if (Platform.OS !== "web") toast.show("Invoice ready to save/share", "success");
+    } catch {
+      toast.show("Could not generate invoice", "error");
     }
   };
 
@@ -307,6 +317,26 @@ export default function More() {
                 <Btn title="Pay & Activate" icon="card" onPress={() => buyDuration(d.m)} loading={buying === d.m} testID={`buy-${d.m}`} />
               </Card>
             ))}
+
+            {sub.history?.length ? (
+              <>
+                <View style={{ height: 1, backgroundColor: colors.divider, marginVertical: spacing.xs }} />
+                <T weight="bold" size={type.lg}>Payment History & Invoices</T>
+                {sub.history.map((h: any) => (
+                  <Card key={h.id} testID={`invoice-row-${h.id}`} style={{ gap: spacing.sm }}>
+                    <Row style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <View style={{ flex: 1 }}>
+                        <T weight="bold">{h.plan_name}</T>
+                        <T size={type.sm} color={colors.onSurfaceSecondary}>{h.invoice_no || "—"}</T>
+                        <T size={12} color={colors.onSurfaceTertiary}>{new Date(h.created_at).toLocaleDateString()} · {(h.method || "online").toUpperCase()}</T>
+                      </View>
+                      <T weight="extrabold" color={colors.brand}>₹{h.amount}</T>
+                    </Row>
+                    <Btn title="Download Invoice" variant="secondary" icon="download" onPress={() => getInvoice(h)} testID={`invoice-${h.id}`} />
+                  </Card>
+                ))}
+              </>
+            ) : null}
           </>
         ) : (
           <LoadingView />
