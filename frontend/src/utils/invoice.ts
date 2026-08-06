@@ -134,6 +134,7 @@ export interface ReceiptData {
   address?: string;
   contact?: string;
   owner_name?: string;
+  owner_signature?: string;
 }
 
 function monthYear(s?: string) {
@@ -168,7 +169,9 @@ function buildReceiptHtml(r: ReceiptData) {
     .total td{border-top:2px solid #2C5E3E;border-bottom:none;font-size:18px;font-weight:800;color:#2C5E3E;padding-top:14px;}
     .sign{margin-top:60px;display:flex;justify-content:flex-end;}
     .sign .box{text-align:center;}
+    .sign .img{height:64px;max-width:220px;object-fit:contain;display:block;margin:0 auto 4px;}
     .sign .name{font-family:'Segoe Script','Brush Script MT',cursive;font-size:22px;color:#2C5E3E;border-bottom:1px solid #1A1D1A;padding:0 24px 4px;}
+    .sign .imgline{border-bottom:1px solid #1A1D1A;padding:0 24px 4px;}
     .sign .lbl{font-size:12px;color:#6A706A;margin-top:6px;}
     .badge{display:inline-block;background:#DCFCE7;color:#166534;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;}
     .footer{margin-top:36px;border-top:1px solid #E5E7E5;padding-top:14px;font-size:12px;color:#6A706A;text-align:center;}
@@ -194,7 +197,9 @@ function buildReceiptHtml(r: ReceiptData) {
 
     <div class="sign">
       <div class="box">
-        <div class="name">${r.owner_name || "Owner"}</div>
+        ${r.owner_signature
+          ? `<div class="imgline"><img class="img" src="${r.owner_signature}" alt="signature"/></div>`
+          : `<div class="name">${r.owner_name || "Owner"}</div>`}
         <div class="lbl">For ${r.pg_name || "Hostel"} · Authorised Signatory</div>
       </div>
     </div>

@@ -530,6 +530,7 @@ class HostelBody(BaseModel):
     sharing_types: List[str] = []
     ownership_proof: Optional[str] = None
     min_rent: Optional[int] = None
+    signature: Optional[str] = None
 
 
 @api.get("/owner/hostels")
@@ -612,22 +613,6 @@ async def owner_update_hostel(hostel_id: str, body: HostelBody, user: dict = Dep
     await db.hostels.update_one({"id": hostel_id}, {"$set": body.dict()})
     h2 = await db.hostels.find_one({"id": hostel_id}, {"_id": 0})
     return {"hostel": h2}
-
-
-class SignatureBody(BaseModel):
-    signature: Optional[str] = None
-
-
-@api.get("/owner/signature")
-async def owner_get_signature(user: dict = Depends(require_roles("owner"))):
-    u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "signature": 1})
-    return {"signature": (u or {}).get("signature")}
-
-
-@api.post("/owner/signature")
-async def owner_save_signature(body: SignatureBody, user: dict = Depends(require_roles("owner"))):
-    await db.users.update_one({"id": user["id"]}, {"$set": {"signature": body.signature}})
-    return {"ok": True}
 
 
 @api.get("/owner/dashboard")

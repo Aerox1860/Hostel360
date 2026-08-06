@@ -45,6 +45,7 @@ export default function TenantPayments() {
         address: hostel?.address ? `${hostel.address}, ${hostel.city || ""}` : hostel?.city,
         contact: hostel?.mobile,
         owner_name: hostel?.owner_name,
+        owner_signature: hostel?.signature,
       });
       if (res && res.ok === false) toast.show(res.error || "Could not open receipt", "error");
       else if (typeof window === "undefined") toast.show("Receipt ready to save/share", "success");
