@@ -21,7 +21,8 @@ Commercial Hostel/PG Management System "Hostel 360" with 4 roles: Admin (platfor
 - **Visitor**: searches/filters hostels, views details, saves favorites, sends enquiry/site-visit/callback.
 
 ## Implemented (2026-06-06)
-- Multi-hostel per owner: owner can create & manage many hostels; header hostel-switcher (persisted active hostel); all owner endpoints scoped by hostel_id with ownership validation.
+- Subscription: bed-slab INR pricing (≤40 / 41–70 / 71–100 / 101–130 / 131+) × 1/3/6/12 months, computed server-side per hostel bed count. 45-day free trial from registration (auto). Razorpay Payment Links (open in WebBrowser + status polling) with friendly 400 until keys set. Admin manual activation (auto price from beds). Success → CelebrationOverlay (flower animation + personalized "Thanks for joining Hostel 360, {name}"). Trial/subscription banner on owner dashboard.
+- Multi-hostel per owner: owner can create & manage many hostels; header hostel-switcher (persisted active hostel); all owner endpoints scoped by hostel_id with ownership validation. Portfolio overview card. Per-hostel photo upload (base64) via expo-image-picker with permission handling.
 - Auth: register/login/me, role routing, Google login wired, admin seed. Roles: admin/owner/tenant.
 - Public: search + filter chips (gender/sharing/query), image hostel cards, verified badge, detail (photos, room types, amenities, reviews), enquiry sheet, favorites.
 - Admin: dashboard KPIs, hostel list + verify (approve/reject/suspend/reactivate), subscription plans CRUD + toggle, owner management (activate/deactivate/block/unblock/reset password).

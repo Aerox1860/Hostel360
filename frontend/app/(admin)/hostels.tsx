@@ -48,6 +48,18 @@ export default function AdminHostels() {
     }
   };
 
+  const activatePlan = async (months: number) => {
+    if (!sel) return;
+    try {
+      const res = await api.post<{ expires_at: string; amount: number }>(`/admin/hostels/${sel.id}/activate-plan`, { months });
+      toast.show(`Plan activated (₹${res.amount}) · expires ${new Date(res.expires_at).toLocaleDateString()}`);
+      setSel(null);
+      load();
+    } catch (e: any) {
+      toast.show(e.message, "error");
+    }
+  };
+
   return (
     <Screen edges={["top"]}>
       <AppHeader title="Hostel Verification" subtitle="Review & manage all listings" />
@@ -102,6 +114,17 @@ export default function AdminHostels() {
           <Btn title="Reactivate Hostel" variant="secondary" icon="play-circle" onPress={() => act("reactivate")} testID="action-reactivate" />
           <Btn title="Reject Hostel" variant="danger" icon="close-circle" onPress={() => act("reject")} testID="action-reject" />
         </View>
+
+        <View style={{ height: 1, backgroundColor: colors.divider, marginVertical: spacing.xs }} />
+        <T weight="bold">Manual Plan Activation</T>
+        <T size={type.sm} color={colors.onSurfaceSecondary}>Activate a premium plan for this hostel (e.g. after offline / bank payment). Price is auto-calculated from bed count.</T>
+        <Row style={{ gap: spacing.sm, flexWrap: "wrap" }}>
+          {[1, 3, 6, 12].map((m) => (
+            <View key={m} style={{ flexGrow: 1, minWidth: "45%" }}>
+              <Btn title={m === 1 ? "1 Month" : `${m} Months`} variant="secondary" onPress={() => activatePlan(m)} testID={`activate-${m}`} />
+            </View>
+          ))}
+        </Row>
       </Sheet>
     </Screen>
   );

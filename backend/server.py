@@ -31,7 +31,40 @@ TOKEN_DAYS = 30
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@hostel360.com")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Admin@12345")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+TRIAL_DAYS = int(os.environ.get("TRIAL_DAYS", "45"))
 BACKEND_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "")
+
+# ---------------- Subscription pricing (bed-slab, INR rupees) ----------------
+# Each slab: (max_beds, {months: price_in_rupees}). Last slab (131+) has max=None.
+PRICE_SLABS = [
+    (40, "Up to 40 beds", {1: 299, 3: 799, 6: 1499, 12: 2499}),
+    (70, "41 – 70 beds", {1: 499, 3: 1299, 6: 2499, 12: 4499}),
+    (100, "71 – 100 beds", {1: 699, 3: 1899, 6: 3699, 12: 6999}),
+    (130, "101 – 130 beds", {1: 999, 3: 2699, 6: 5199, 12: 9999}),
+    (None, "131+ beds", {1: 1499, 3: 3999, 6: 7999, 12: 14999}),
+]
+
+
+def slab_for_beds(beds: int):
+    for max_beds, label, prices in PRICE_SLABS:
+        if max_beds is None or beds <= max_beds:
+            return {"label": label, "prices": prices, "max_beds": max_beds}
+    return {"label": PRICE_SLABS[-1][1], "prices": PRICE_SLABS[-1][2], "max_beds": None}
+
+
+def _rzp_ready() -> bool:
+    return bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_ID.startswith("rzp_") and RAZORPAY_KEY_SECRET)
+
+
+def add_months(dt: datetime, months: int) -> datetime:
+    try:
+        from dateutil.relativedelta import relativedelta
+        return dt + relativedelta(months=+months)
+    except Exception:
+        return dt + timedelta(days=30 * months)
 
 app = FastAPI(title="Hostel 360 API")
 api = APIRouter(prefix="/api")
@@ -562,6 +595,7 @@ async def owner_create_hostel(body: HostelBody, user: dict = Depends(require_rol
         "identity_verified": False,
         "premium_plan": None,
         "plan_expiry": None,
+        "trial_ends_at": (now_utc() + timedelta(days=TRIAL_DAYS)).isoformat(),
         "rating": 0,
         "reviews_count": 0,
         "created_at": now_utc().isoformat(),
@@ -618,6 +652,7 @@ async def owner_dashboard(hostel_id: Optional[str] = None, user: dict = Depends(
         "monthly_profit": round(month_collection - month_expenses, 2),
         "pending_payments": len(pending),
         "occupancy_pct": round((occupied / total_beds * 100), 0) if total_beds else 0,
+        "subscription": compute_sub_status(h),
     }
 
 
@@ -1079,6 +1114,182 @@ async def tenant_add_request(body: RequestBody, user: dict = Depends(require_rol
     return {"request": clean(doc)}
 
 
+# ---------------- Subscription (bed-slab pricing + trial + Razorpay) ----------------
+def _parse_dt(s):
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+async def bed_count_for_hostel(hostel_id: str) -> int:
+    rooms = await db.rooms.find({"hostel_id": hostel_id}, {"_id": 0, "beds": 1}).to_list(2000)
+    return sum(len(r.get("beds", [])) for r in rooms)
+
+
+def compute_sub_status(hostel: dict) -> dict:
+    now = now_utc()
+    expiry = _parse_dt(hostel.get("plan_expiry"))
+    trial = _parse_dt(hostel.get("trial_ends_at"))
+    if expiry and expiry > now:
+        return {"status": "active", "plan": hostel.get("premium_plan"),
+                "expires_at": hostel.get("plan_expiry"),
+                "days_left": (expiry - now).days, "is_premium": True}
+    if trial and trial > now:
+        return {"status": "trial", "plan": "Free Trial",
+                "expires_at": hostel.get("trial_ends_at"),
+                "days_left": (trial - now).days, "is_premium": True}
+    return {"status": "expired", "plan": None,
+            "expires_at": hostel.get("plan_expiry") or hostel.get("trial_ends_at"),
+            "days_left": 0, "is_premium": False}
+
+
+@api.get("/owner/subscription")
+async def owner_subscription(hostel_id: Optional[str] = None, user: dict = Depends(require_roles("owner"))):
+    h = await get_owner_hostel(user, hostel_id)
+    if not h:
+        raise HTTPException(400, "Create your hostel first")
+    beds = await bed_count_for_hostel(h["id"])
+    slab = slab_for_beds(beds)
+    return {
+        "hostel_id": h["id"],
+        "hostel_name": h["name"],
+        "bed_count": beds,
+        "slab_label": slab["label"],
+        "prices": slab["prices"],
+        "payments_enabled": _rzp_ready(),
+        "subscription": compute_sub_status(h),
+        "history": await db.subscriptions.find({"hostel_id": h["id"]}, {"_id": 0}).sort("created_at", -1).to_list(50),
+    }
+
+
+async def _activate_subscription(hostel: dict, months: int, amount: float, method: str, owner_id: str):
+    now = now_utc()
+    current_expiry = _parse_dt(hostel.get("plan_expiry"))
+    base = current_expiry if (current_expiry and current_expiry > now) else now
+    end = add_months(base, months)
+    plan_name = {1: "Monthly", 3: "3-Month", 6: "6-Month", 12: "12-Month"}.get(months, f"{months}-Month") + " Plan"
+    await db.subscriptions.insert_one({
+        "id": new_id(), "owner_id": owner_id, "hostel_id": hostel["id"],
+        "plan_name": plan_name, "months": months, "amount": amount, "method": method,
+        "status": "active", "start": now.isoformat(), "end": end.isoformat(),
+        "created_at": now.isoformat(),
+    })
+    await db.hostels.update_one({"id": hostel["id"]}, {"$set": {
+        "premium_plan": plan_name, "plan_expiry": end.isoformat()}})
+    return end.isoformat()
+
+
+class SubLinkBody(BaseModel):
+    hostel_id: str
+    months: Literal[1, 3, 6, 12]
+
+
+@api.post("/payments/subscription/link")
+async def create_sub_link(body: SubLinkBody, user: dict = Depends(require_roles("owner"))):
+    h = await hostel_owned(user, body.hostel_id)
+    if not h:
+        raise HTTPException(404, "Hostel not found")
+    if not _rzp_ready():
+        raise HTTPException(400, "Online payments are not configured yet. Please try manual activation via admin, or add a Razorpay key.")
+    beds = await bed_count_for_hostel(h["id"])
+    slab = slab_for_beds(beds)
+    rupees = slab["prices"][body.months]
+    amount_paise = int(rupees * 100)
+    import razorpay as _rzp
+    rpc = _rzp.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+    reference = f"sub_{h['id']}_{int(now_utc().timestamp()*1000)}"
+    link = rpc.payment_link.create({
+        "amount": amount_paise, "currency": "INR", "accept_partial": False,
+        "reference_id": reference,
+        "description": f"Hostel 360 - {slab['label']} - {body.months} month(s)",
+        "customer": {"name": user.get("name") or "Owner", "contact": user.get("mobile") or "", "email": user.get("email") or ""},
+        "notify": {"sms": False, "email": False}, "reminder_enable": False,
+        "callback_url": f"{BACKEND_URL}/api/razorpay/callback", "callback_method": "get",
+    })
+    await db.rp_payments.insert_one({
+        "id": new_id(), "payment_link_id": link["id"], "reference_id": reference,
+        "hostel_id": h["id"], "owner_id": user["id"], "months": body.months,
+        "amount": rupees, "amount_paise": amount_paise, "status": "created",
+        "activated": False, "created_at": now_utc().isoformat(),
+    })
+    return {"payment_link_id": link["id"], "checkout_url": link["short_url"], "amount": rupees}
+
+
+@api.get("/payments/subscription/status/{payment_link_id}")
+async def sub_status(payment_link_id: str, user: dict = Depends(require_roles("owner"))):
+    rec = await db.rp_payments.find_one({"payment_link_id": payment_link_id, "owner_id": user["id"]}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Payment not found")
+    if rec.get("activated"):
+        return {"status": "paid", "activated": True, "months": rec["months"]}
+    if _rzp_ready():
+        import razorpay as _rzp
+        rpc = _rzp.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+        remote = rpc.payment_link.fetch(payment_link_id)
+        if remote.get("status") == "paid":
+            h = await db.hostels.find_one({"id": rec["hostel_id"]}, {"_id": 0})
+            await _activate_subscription(h, rec["months"], rec["amount"], "razorpay", rec["owner_id"])
+            await db.rp_payments.update_one({"payment_link_id": payment_link_id},
+                                            {"$set": {"status": "paid", "activated": True, "paid_at": now_utc().isoformat()}})
+            return {"status": "paid", "activated": True, "months": rec["months"]}
+        return {"status": remote.get("status", "pending"), "activated": False}
+    return {"status": rec.get("status", "pending"), "activated": False}
+
+
+@api.get("/razorpay/callback")
+async def razorpay_callback(status: str = "paid"):
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse("<html><body style='font-family:sans-serif;text-align:center;padding-top:80px'>"
+                        "<h2>Payment received 🎉</h2><p>You can return to the Hostel 360 app.</p></body></html>")
+
+
+@api.post("/razorpay/webhook")
+async def razorpay_webhook(request: Request):
+    import hmac, hashlib, json as _json
+    raw = await request.body()
+    sig = request.headers.get("X-Razorpay-Signature", "")
+    if RAZORPAY_WEBHOOK_SECRET:
+        expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            raise HTTPException(400, "Invalid webhook signature")
+    try:
+        event = _json.loads(raw)
+    except Exception:
+        raise HTTPException(400, "Bad payload")
+    if event.get("event") in ("payment_link.paid",):
+        entity = event.get("payload", {}).get("payment_link", {}).get("entity", {})
+        link_id = entity.get("id")
+        rec = await db.rp_payments.find_one({"payment_link_id": link_id})
+        if rec and not rec.get("activated"):
+            h = await db.hostels.find_one({"id": rec["hostel_id"]}, {"_id": 0})
+            if h:
+                await _activate_subscription(h, rec["months"], rec["amount"], "razorpay", rec["owner_id"])
+                await db.rp_payments.update_one({"payment_link_id": link_id},
+                                                {"$set": {"status": "paid", "activated": True}})
+    return {"ok": True}
+
+
+class ManualActivateBody(BaseModel):
+    months: Literal[1, 3, 6, 12]
+    note: Optional[str] = None
+
+
+@api.post("/admin/hostels/{hostel_id}/activate-plan")
+async def admin_activate_plan(hostel_id: str, body: ManualActivateBody, user: dict = Depends(require_roles("admin"))):
+    h = await db.hostels.find_one({"id": hostel_id}, {"_id": 0})
+    if not h:
+        raise HTTPException(404, "Hostel not found")
+    beds = await bed_count_for_hostel(hostel_id)
+    slab = slab_for_beds(beds)
+    amount = slab["prices"][body.months]
+    end = await _activate_subscription(h, body.months, amount, "manual", h["owner_id"])
+    return {"ok": True, "expires_at": end, "amount": amount, "plan_months": body.months}
+
+
 # ---------------- Payments (Stripe) ----------------
 class SubCheckoutBody(BaseModel):
     plan_id: str
@@ -1254,6 +1465,12 @@ async def startup():
     # seed demo owner + hostels + tenant for an instant end-to-end demo
     if await db.hostels.count_documents({}) == 0:
         await _seed_demo()
+
+    # backfill 45-day trial for hostels missing trial_ends_at
+    async for h in db.hostels.find({"trial_ends_at": {"$exists": False}}, {"_id": 0, "id": 1, "created_at": 1}):
+        base = _parse_dt(h.get("created_at")) or now_utc()
+        await db.hostels.update_one({"id": h["id"]},
+                                    {"$set": {"trial_ends_at": (base + timedelta(days=TRIAL_DAYS)).isoformat()}})
 
 
 IMG = {

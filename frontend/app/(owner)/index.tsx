@@ -119,6 +119,27 @@ export default function OwnerDashboard() {
           </Card>
         ) : null}
 
+        {data?.subscription ? (
+          <Card style={{
+            backgroundColor: data.subscription.status === "expired" ? "#FEF3C7" : colors.brandTertiary,
+            borderColor: colors.brandSecondary,
+          }}>
+            <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <Row style={{ gap: spacing.sm, flex: 1 }}>
+                <Ionicons name={data.subscription.status === "trial" ? "gift" : data.subscription.status === "active" ? "diamond" : "alert-circle"} size={18} color={data.subscription.status === "expired" ? colors.warning : colors.brand} />
+                <T size={type.sm} color={colors.onSurface} style={{ flex: 1 }}>
+                  {data.subscription.status === "trial" ? `Free trial · ${data.subscription.days_left} days left` :
+                   data.subscription.status === "active" ? `${data.subscription.plan} · ${data.subscription.days_left} days left` :
+                   "Subscription expired — renew to stay premium"}
+                </T>
+              </Row>
+              <Pressable testID="dash-upgrade" onPress={() => router.push("/(owner)/more" as any)}>
+                <T size={type.sm} weight="bold" color={colors.brand}>{data.subscription.status === "active" ? "Manage" : "Upgrade"}</T>
+              </Pressable>
+            </Row>
+          </Card>
+        ) : null}
+
         {/* Occupancy hero */}
         <Card style={{ gap: spacing.sm }}>
           <Row style={{ justifyContent: "space-between" }}>

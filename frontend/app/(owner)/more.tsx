@@ -4,6 +4,7 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field } from "@/src/components/ui";
 import { HostelFormSheet } from "@/src/components/HostelFormSheet";
+import { CelebrationOverlay } from "@/src/components/CelebrationOverlay";
 import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { api, BACKEND_URL } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
@@ -33,7 +34,9 @@ export default function More() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
-  const [plans, setPlans] = useState<any[]>([]);
+  const [sub, setSub] = useState<any>(null);
+  const [buying, setBuying] = useState<number | null>(null);
+  const [celebrate, setCelebrate] = useState(false);
 
   const load = useCallback(async () => {
     if (!activeId) { setLoading(false); return; }
@@ -87,18 +90,40 @@ export default function More() {
     setEnquiries(enquiries);
     setEnquiriesOpen(true);
   };
-  const openPlans = async () => {
-    const { plans } = await api.get<{ plans: any[] }>("/plans?active_only=true");
-    setPlans(plans);
-    setPlanOpen(true);
-  };
-  const buyPlan = async (planId: string) => {
+  const openSub = async () => {
     try {
-      const res = await api.post<{ url: string }>("/payments/subscription/checkout", { plan_id: planId, hostel_id: activeId });
-      setPlanOpen(false);
-      await WebBrowser.openBrowserAsync(res.url);
+      const s = await api.get(`/owner/subscription?hostel_id=${activeId}`);
+      setSub(s);
+      setPlanOpen(true);
     } catch (e: any) {
-      toast.show(e.message || "Payments not available yet", "error");
+      toast.show(e.message || "Could not load subscription", "error");
+    }
+  };
+  const buyDuration = async (months: number) => {
+    setBuying(months);
+    try {
+      const res = await api.post<{ checkout_url: string; payment_link_id: string }>(
+        "/payments/subscription/link", { hostel_id: activeId, months }
+      );
+      await WebBrowser.openBrowserAsync(res.checkout_url);
+      // poll for activation
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const st = await api.get<{ activated: boolean }>(`/payments/subscription/status/${res.payment_link_id}`);
+        if (st.activated) {
+          setPlanOpen(false);
+          setCelebrate(true);
+          await refreshHostels();
+          load();
+          setBuying(null);
+          return;
+        }
+      }
+      toast.show("Payment is still being verified. Pull to refresh shortly.", "info");
+    } catch (e: any) {
+      toast.show(e.message || "Online payments not configured yet", "error");
+    } finally {
+      setBuying(null);
     }
   };
 
@@ -167,7 +192,7 @@ export default function More() {
         <MenuItem icon="megaphone" title="Notices" subtitle="Post notices for tenants" onPress={openNotices} testID="menu-notices" />
         <MenuItem icon="chatbubbles" title="Complaints & Requests" subtitle="View & resolve tenant issues" onPress={openComplaints} testID="menu-complaints" />
         <MenuItem icon="mail" title="Enquiries" subtitle="Leads from public listing" onPress={openEnquiries} testID="menu-enquiries" />
-        <MenuItem icon="diamond" title="Upgrade Plan" subtitle="Get verified & featured" tint="#FEF3C7" onPress={openPlans} testID="menu-upgrade" />
+        <MenuItem icon="diamond" title="Subscription & Plans" subtitle="Free trial, upgrade & pricing" tint="#FEF3C7" onPress={openSub} testID="menu-upgrade" />
         <MenuItem icon="create" title="Edit Hostel Details" onPress={() => setEditOpen(true)} testID="menu-edit" />
         <MenuItem icon="log-out" title="Log out" tint="#FEE2E2" onPress={logout} testID="menu-logout" />
       </ScrollView>
@@ -228,21 +253,69 @@ export default function More() {
         ))}
       </Sheet>
 
-      {/* Plans sheet */}
-      <Sheet visible={planOpen} onClose={() => setPlanOpen(false)} title="Upgrade Plan">
-        <T color={colors.onSurfaceSecondary}>Boost visibility and get the verified badge.</T>
-        {plans.map((p) => (
-          <Card key={p.id} style={{ gap: spacing.sm }}>
-            <Row style={{ justifyContent: "space-between" }}>
-              <T weight="bold" size={type.lg}>{p.name}</T>
-              <T weight="extrabold" size={type.xl} color={colors.brand}>${p.price}</T>
+      {/* Subscription sheet */}
+      <Sheet visible={planOpen} onClose={() => setPlanOpen(false)} title="Subscription & Plans">
+        {sub ? (
+          <>
+            <Card style={{ backgroundColor: sub.subscription.is_premium ? colors.brand : colors.warning, borderColor: "transparent", gap: 4 }}>
+              <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <T weight="bold" color="#fff" size={type.lg}>
+                  {sub.subscription.status === "trial" ? "Free Trial Active" : sub.subscription.status === "active" ? "Premium Active" : "Subscription Expired"}
+                </T>
+                <Ionicons name={sub.subscription.is_premium ? "diamond" : "alert-circle"} size={22} color="#fff" />
+              </Row>
+              {sub.subscription.is_premium ? (
+                <T size={type.sm} color="rgba(255,255,255,0.9)">
+                  {sub.subscription.days_left} days left{sub.subscription.plan ? ` · ${sub.subscription.plan}` : ""}
+                </T>
+              ) : (
+                <T size={type.sm} color="rgba(255,255,255,0.9)">Renew now to keep your verified badge & featured listing.</T>
+              )}
+            </Card>
+
+            <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <T weight="bold">{sub.slab_label}</T>
+              <Badge label={`${sub.bed_count} beds`} tone="brand" />
             </Row>
-            <Btn title="Subscribe" icon="card" onPress={() => buyPlan(p.id)} testID={`buy-${p.id}`} />
-          </Card>
-        ))}
+            <T size={type.sm} color={colors.onSurfaceSecondary}>Pricing is based on your hostel's total beds. Choose a duration:</T>
+
+            {!sub.payments_enabled ? (
+              <Card style={{ backgroundColor: colors.brandTertiary, borderColor: colors.brandSecondary }}>
+                <Row style={{ gap: 6 }}>
+                  <Ionicons name="information-circle" size={16} color={colors.brand} />
+                  <T size={type.sm} color={colors.onBrandSecondary} style={{ flex: 1 }}>
+                    Online payment isn't set up yet. You can still enjoy your free trial, or ask admin to activate a plan for you.
+                  </T>
+                </Row>
+              </Card>
+            ) : null}
+
+            {[
+              { m: 1, label: "Monthly" },
+              { m: 3, label: "3 Months" },
+              { m: 6, label: "6 Months" },
+              { m: 12, label: "12 Months" },
+            ].map((d) => (
+              <Card key={d.m} testID={`plan-${d.m}`} style={{ gap: spacing.sm }}>
+                <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <View>
+                    <T weight="bold" size={type.lg}>{d.label}</T>
+                    {d.m >= 6 ? <T size={type.sm} color={colors.brand} weight="semibold">Best value</T> : null}
+                  </View>
+                  <T weight="extrabold" size={type.xl} color={colors.brand}>₹{sub.prices[String(d.m)] ?? sub.prices[d.m]}</T>
+                </Row>
+                <Btn title="Pay & Activate" icon="card" onPress={() => buyDuration(d.m)} loading={buying === d.m} testID={`buy-${d.m}`} />
+              </Card>
+            ))}
+          </>
+        ) : (
+          <LoadingView />
+        )}
       </Sheet>
 
       <HostelFormSheet visible={editOpen} onClose={() => setEditOpen(false)} initial={hostel} onSaved={async () => { setEditOpen(false); await refreshHostels(); load(); }} />
+
+      <CelebrationOverlay visible={celebrate} name={activeHostel?.name} planLabel={sub?.subscription?.plan} onClose={() => setCelebrate(false)} />
     </Screen>
   );
 }
