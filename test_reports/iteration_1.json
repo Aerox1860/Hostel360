@@ -1,0 +1,42 @@
+{
+  "summary": "Hostel 360 full-stack test. Backend: 40/40 pytest tests passed covering auth (login/register/me, wrong password 401, admin-role restriction 422), public search (list, city/gender/max_budget filters, detail with reviews+available_beds+room_options, enquiry create), admin (dashboard KPIs, pending hostels list, verify approve/suspend/reactivate, owners list, plans CRUD+toggle, 403 for owner/tenant), owner (dashboard, hostel CRUD, room add/list/delete, tenant add+transfer+checkout+delete, rent collection with receipt_no & payment_status update, expenses CRUD, reports monthly/by_category, notices, complaints, enquiries, 403 on tenant route), tenant (home with allocation, payments, notices, complaint flow visible to owner, request), and payments (subscription+rent checkout return 400 'not configured' as expected; sub checkout enforces owner role 403). Frontend: Public search screen loads 5 seeded hostel cards with images and chip filters (gender=boys narrows to 1). Hostel detail opens with photos, room types (₹9500 single / ₹7000 double / ₹6500 double / ₹5500 triple), amenities, and enquiry sheet submits successfully with 'Request sent!' toast. Login for admin@hostel360.com, owner@hostel360.com, tenant@hostel360.com all route to their correct portals (stat-hostels / stat-collection / room-details visible). Owner rooms tab shows 4 rooms with bed statuses and delete buttons on empty rooms. Money tab shows Total collected ₹7100 with receipt-numbered payment history and Rent/Expenses toggle. Tenants tab lists Amit Verma with Manage action and Add Tenant modal (Full name, Mobile, Email, Room selector chips, Rent, Deposit, Advance, 'Create tenant login' checkbox default Tenant@12345). Tenant dashboard shows Monthly Rent card (PAID after backend rent test), Room Details (T0404EA, Room 102, Bed 102-1, Deposit ₹14000, Advance ₹7000), and Call Owner button. No blocking issues found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/admin/owners/{id}/action reset_password", "issue": "Update dict is written twice (once inside reset_password branch, once at end) — harmless but redundant. Actual behavior correct."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Owner logout → login again in same session", "issue": "After tapping [data-testid=owner-logout] a subsequent wait for [data-testid=login-email] timed out at 8s in the automation session. Fresh page loads render the login screen instantly. Likely a router-replace vs push nuance in Expo Router — verify AuthContext state clears on logout.", "affected_testIDs": ["owner-logout", "login-email"]}
+    ],
+    "design_issues": [
+      {"screen": "console (all screens)", "issues": [
+        "React Native Web deprecation warnings emitted: 'shadow*' style props deprecated (use boxShadow), 'props.pointerEvents' deprecated (use style.pointerEvents), and Animated useNativeDriver not supported on web. Not blocking, but pollute console. Consider migrating shadow* → boxShadow via a small StyleSheet helper.",
+        "Toast/alert in enquiry uses default Alert.alert on web — visually shows as banner (works)."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "(Optional) Investigate that logging out from owner portal returns cleanly to /(auth)/login without state-race — verify router.replace('/(auth)/login') is used in AuthContext.logout, and token/user are cleared before navigating.",
+    "(Optional) Migrate any shadow* style props to boxShadow to remove Expo web deprecation warnings.",
+    "No functional fixes required — payments returning 400 with friendly 'not configured' message is verified and expected per spec until STRIPE_API_KEY is set."
+  ],
+  "critical_code_review_comments": [
+    "server.py at 1327 lines is large but cohesive — consider splitting into routers/auth.py, routers/owner.py, routers/admin.py, routers/tenant.py, routers/payments.py for future maintainability.",
+    "reset_password branch in POST /api/admin/owners/{id}/action performs update+return inside branch but the final line also runs `await db.users.update_one` — refactor to a single write path.",
+    "get_current_user token order is JWT then session-token; both paths correctly clean _id and honor blocked flag.",
+    "All Mongo reads use projection {\"_id\":0}. No ObjectId leaks were observed in responses. Good.",
+    "Pydantic Literal enforcement on RegisterBody.role prevents privilege escalation to admin (returns 422 as verified in tests)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (40/40)", "frontend": "~95% (all core flows verified; single flaky post-logout re-login navigation in one session)"},
+  "seed_data_creation": "Used the backend's built-in idempotent seed (admin, owner Rahul Sharma with Green Nest Co-Living + 4 rooms + tenant Amit Verma + 1 payment + 1 expense + notice + 2 reviews, 3 extra approved hostels, 1 pending Urban Roost PG). Note: pytest suite may have approved the pending 'Urban Roost' hostel and collected additional rent for Amit Verma. State remains consistent.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend has full pytest suite at /app/backend/tests/backend_test.py — run with `pytest /app/backend/tests/backend_test.py -v --junitxml=/app/test_reports/pytest/pytest_results.xml`. Frontend URL is https://pg-manager-35.preview.emergentagent.com. Credentials in /app/memory/test_credentials.md. Payments intentionally return HTTP 400 with 'not configured' message — do NOT flag as bug until STRIPE_API_KEY is added to /app/backend/.env. Seeded pending hostel 'Urban Roost PG' may have been approved by prior admin verify test; if a fresh pending hostel is needed, POST /api/owner/hostel (with a new owner) or restart Mongo with cleared collections to trigger reseed.",
+  "rca_of_issue": "N/A — no critical bugs. Only observed minor: (a) post-logout re-login navigation timeout observed once in an automation session (likely router.replace timing); (b) redundant DB write in admin owner reset_password branch (functionally harmless); (c) RN-Web deprecation warnings (shadow*, pointerEvents, useNativeDriver) — cosmetic."
+}
