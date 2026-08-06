@@ -1,0 +1,159 @@
+{
+  "app_name": "Hostel 360",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A trustworthy, clean, and structured environment that balances high-density property management data with an inviting, imagery-rich public marketplace.",
+  "color": {
+    "surface": "#FFFFFF",
+    "onSurface": "#1A1D1A",
+    "surfaceSecondary": "#F4F5F4",
+    "onSurfaceSecondary": "#4E534E",
+    "surfaceTertiary": "#E9EBE9",
+    "onSurfaceTertiary": "#6A706A",
+    "surfaceInverse": "#1A1D1A",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#2C5E3E",
+    "brandPrimary": "#2C5E3E",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#E3ECE5",
+    "onBrandSecondary": "#1D402A",
+    "brandTertiary": "#F0F5F1",
+    "onBrandTertiary": "#2C5E3E",
+    "success": "#166534",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D97706",
+    "onWarning": "#FFFFFF",
+    "error": "#DC2626",
+    "onError": "#FFFFFF",
+    "info": "#0F766E",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E7E5",
+    "borderStrong": "#D1D5D1",
+    "divider": "#F0F1F0"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous padding around content. Clear grouping of elements. Do not leave accidental empty space on the right side of cards. Sticky primary CTAs over scrolling content.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Ionicons",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Bottom tab bar when content scrolls behind it",
+      "Sticky headers over scrolling content",
+      "Featured/hero cards frosted glass overlay on brand-tinted or photo backdrop",
+      "Sticky horizontal chip bar for filters on the search screen"
+    ],
+    "dont's": [
+      "Every button, list rows, chips, cards in dense lists, form inputs",
+      "Foreground readability failure (use underlying tint opacity >=70% if needed)"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Public Visitor - Search & Explore",
+      "purpose": "Allow users to search, filter, and discover hostels/PGs with high-quality imagery and clear pricing.",
+      "states": {
+        "loading": "Skeleton loading cards with image placeholders",
+        "empty": "Illustration of a house with 'No hostels found in this area. Try adjusting your filters.' + 'Reset Filters' CTA",
+        "error": "'Failed to load properties' + Retry button"
+      },
+      "layout": "Row 1: Sticky search field and sort/filter buttons. Row 2: Sticky horizontal scrollable filter chips (Boys/Girls, AC/Non-AC, Price). Below: Full-width list of hostel cards. Each card has a large hero image, a gradient scrim at the bottom with the Hostel Name, rating, and price. Verified badge floating at the top right."
+    },
+    {
+      "name": "Hostel Owner - Dashboard",
+      "purpose": "Provide property owners a quick glance at their occupancy, pending collections, and daily operations.",
+      "states": {
+        "loading": "Spinner centered",
+        "empty": "'Add your first hostel/building to start managing' + 'Add Property' Primary CTA",
+        "error": "'Could not load dashboard data' + Retry button"
+      },
+      "layout": "Progressive disclosure structure. Top section: Horizontal scroll of primary KPI stat cards (Occupancy %, Monthly Collection, Pending Rent). Below: Quick Actions grid (2-col grid for Add Tenant, Add Room, Collect Rent). Bottom: List of 'Today's Check-ins/Outs' and recent complaints."
+    },
+    {
+      "name": "Admin - Platform Dashboard",
+      "purpose": "Platform owner overview of total properties, revenue, and pending approvals.",
+      "states": {
+        "loading": "Spinner centered",
+        "empty": "'No data available yet' (unlikely for admin)",
+        "error": "'Failed to load admin stats' + Retry button"
+      },
+      "layout": "Data-dense but clean single-column flow. Top KPI cards (Total Hostels, Premium Plans Active). Next section: 'Pending Verifications' list where each list item has 'Approve' and 'Reject' quick-action buttons directly on the row to save taps."
+    },
+    {
+      "name": "Tenant - My Room & Rent",
+      "purpose": "Tenant self-service portal to view room details, pay rent, and track history.",
+      "states": {
+        "loading": "Spinner centered",
+        "empty": "'No active room allocation found' + 'Contact Admin'",
+        "error": "'Could not load tenant details' + Retry button"
+      },
+      "layout": "Profile cover banner at top. Large 'Rent Status' card prominently displayed (Due / Paid) with a sticky primary 'Pay Rent' CTA at the bottom if due. Below rent card: Room details (Floor, Bed No, WiFi password) and 'Recent Receipts' list."
+    }
+  ],
+  "images": {
+    "logo_abstract": {
+      "url": "https://images.unsplash.com/photo-1622396481322-3b83d186701b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwyfHxtb2Rlcm4lMjBtaW5pbWFsJTIwYXJjaGl0ZWN0dXJlJTIwYnVpbGRpbmclMjBsb2dvfGVufDB8fHx8MTc4NjAwNDMzMXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Modern minimal architecture abstract building for logo"
+    },
+    "hostel_bunk_room": {
+      "url": "https://images.unsplash.com/photo-1709805619372-40de3f158e83?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MjJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBob3N0ZWwlMjBidW5rJTIwYmVkcyUyMHJvb218ZW58MHx8fHwxNzg2MDA0MzMxfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Modern hostel room with bunk beds"
+    },
+    "coliving_space_hero": {
+      "url": "https://images.unsplash.com/photo-1772471586681-8dba94c41ff7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwyfHx5b3VuZyUyMHBlb3BsZSUyMHN0dWRlbnRzJTIwY28tbGl2aW5nJTIwc3BhY2V8ZW58MHx8fHwxNzg2MDA0MzMxfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Young people in a modern co-living space kitchen"
+    }
+  },
+  "haptics": {
+    "tab_press": "light",
+    "primary_button_press": "medium",
+    "filter_chip_toggle": "light",
+    "approve_reject_action": "medium"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the No-Tolerance rule for colors: DO NOT use any shade of Blue, Navy, Purple, or Indigo. The primary brand color is Deep Emerald/Moss Green (#2C5E3E) which signals stability and shelter without falling into the generic AI-blue trap.",
+    "The app has 4 distinct roles. Implement Role-Based Access Control logic for the default landing screens. Admin sees System Dashboard, Owner sees Property Dashboard, Tenant sees My Room, Visitor sees Public Search.",
+    "Implement the 'Sticky primary CTA' pattern for major forms (Add Tenant, Pay Rent) so it floats above the scrollable content.",
+    "For the Public Search screen, implement a sticky horizontal scrollable filter chip bar. This allows quick filtering without navigating away from the list.",
+    "Ensure every property list card features a real image from the image slots and has a bottom gradient scrim (transparent to surfaceInverse) so text overlaid on it is readable.",
+    "Admin verification rows should surface 'Approve'/'Reject' actions directly on the list item to avoid unnecessary drill-down navigation.",
+    "When displaying stats in Owner/Admin dashboards, use progressive disclosure. Put the most important KPIs (Occupancy, Revenue) in large cards, and secondary details in smaller lists below."
+  ]
+}
