@@ -1,21 +1,18 @@
 import { useCallback, useState } from "react";
 import { View, ScrollView, RefreshControl, Pressable, Linking } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Btn } from "@/src/components/ui";
+import { Screen, AppHeader, T, Card, Row, LoadingView, EmptyState, Btn } from "@/src/components/ui";
 import { api } from "@/src/api/client";
+import { AdvertisementSlot } from "@/src/components/AdvertisementSlot";
 import { useAuth } from "@/src/context/AuthContext";
-import { useToast } from "@/src/components/Toast";
 import { colors, spacing, radius, type } from "@/src/theme";
-import * as WebBrowser from "expo-web-browser";
 
 export default function TenantHome() {
   const { user, logout } = useAuth();
-  const toast = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [paying, setPaying] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -30,29 +27,27 @@ export default function TenantHome() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const payRent = async () => {
-    setPaying(true);
-    try {
-      const res = await api.post<{ url: string }>("/payments/rent/checkout", {});
-      await WebBrowser.openBrowserAsync(res.url);
-    } catch (e: any) {
-      toast.show(e.message || "Online payment not available yet", "error");
-    } finally {
-      setPaying(false);
-    }
-  };
-
   if (loading) return <Screen><LoadingView /></Screen>;
 
   if (!data?.has_allocation) {
     return (
       <Screen edges={["top"]}>
         <AppHeader title="My Room" subtitle={user?.name} right={<LogoutBtn onPress={logout} />} />
-        <EmptyState
-          icon="bed-outline"
-          title="No active room allocation"
-          subtitle="Your hostel owner hasn't allocated a room to you yet. Please contact them."
-        />
+        <ScrollView contentContainerStyle={{ flexGrow: 1, padding: spacing.lg, gap: spacing.md }}>
+          <AdvertisementSlot />
+          <Btn
+            title="Global history sharing"
+            variant="secondary"
+            icon="shield-checkmark-outline"
+            onPress={() => router.push("/(tenant)/history-sharing" as any)}
+            testID="tenant-history-sharing"
+          />
+          <EmptyState
+            icon="bed-outline"
+            title="No active room allocation"
+            subtitle="Your hostel owner hasn't allocated a room to you yet. Please contact them."
+          />
+        </ScrollView>
       </Screen>
     );
   }
@@ -68,6 +63,14 @@ export default function TenantHome() {
         contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: due ? 120 : spacing["3xl"] }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.brand} />}
       >
+        <AdvertisementSlot />
+        <Btn
+          title="Global history sharing"
+          variant="secondary"
+          icon="shield-checkmark-outline"
+          onPress={() => router.push("/(tenant)/history-sharing" as any)}
+          testID="tenant-history-sharing"
+        />
         {/* Rent status hero */}
         <Card style={{ backgroundColor: due ? colors.warning : colors.brand, borderColor: "transparent", gap: spacing.sm }}>
           <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -76,9 +79,14 @@ export default function TenantHome() {
               <T weight="extrabold" size={type["3xl"]} color="#fff">₹{t.monthly_rent}</T>
             </View>
             <View style={{ backgroundColor: "rgba(255,255,255,0.22)", paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill }}>
-              <T weight="bold" color="#fff">{due ? "DUE" : "PAID"}</T>
+              <T weight="bold" color="#fff">{data.pending_rent_payment ? "PENDING APPROVAL" : due ? "DUE" : "PAID"}</T>
             </View>
           </Row>
+          {data.pending_rent_payment ? (
+            <T size={type.sm} color="rgba(255,255,255,0.9)">
+              ₹{data.pending_rent_payment.amount} submitted for owner approval. Rent is not marked paid yet.
+            </T>
+          ) : null}
           {t.last_paid ? <T size={type.sm} color="rgba(255,255,255,0.85)">Last paid: {new Date(t.last_paid).toLocaleDateString()}</T> : null}
         </Card>
 
@@ -110,7 +118,7 @@ export default function TenantHome() {
 
       {due ? (
         <View style={styles.sticky}>
-          <Btn title="Pay Rent Now" icon="card" onPress={payRent} loading={paying} testID="pay-rent" />
+          <Btn title="Pay Rent Now" icon="card" onPress={() => router.push("/(tenant)/payments" as any)} testID="pay-rent" />
         </View>
       ) : null}
     </Screen>

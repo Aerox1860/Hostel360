@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { View, Pressable } from "react-native";
+import { Pressable } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Screen, T, Field, Btn, Row, AppHeader } from "@/src/components/ui";
-import { useAuth, routeForRole } from "@/src/context/AuthContext";
+import { useAuth, routeAfterAuthentication } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, radius, type } from "@/src/theme";
 
 export default function Register() {
+  const { propertyId } = useLocalSearchParams<{ propertyId?: string | string[] }>();
   const { register } = useAuth();
   const toast = useToast();
   const [name, setName] = useState("");
@@ -26,7 +27,8 @@ export default function Register() {
     try {
       const user = await register({ name, email: email.trim(), mobile, password, role });
       toast.show("Account created!");
-      router.replace(routeForRole(user.role) as any);
+      const selectedPropertyId = Array.isArray(propertyId) ? propertyId[0] : propertyId;
+      router.replace(routeAfterAuthentication(user, selectedPropertyId) as any);
     } catch (e: any) {
       toast.show(e.message || "Registration failed", "error");
     } finally {
@@ -59,7 +61,13 @@ export default function Register() {
 
   return (
     <Screen edges={["top", "bottom"]} bg={colors.surface}>
-      <AppHeader title="Create account" onBack={() => router.back()} />
+      <AppHeader
+        title="Create account"
+        onBack={() => {
+          if (propertyId) router.replace("/(public)" as any);
+          else router.back();
+        }}
+      />
       <KeyboardAwareScrollView
         bottomOffset={24}
         keyboardShouldPersistTaps="handled"
@@ -81,7 +89,12 @@ export default function Register() {
         <Btn title="Create Account" onPress={onSubmit} loading={loading} testID="reg-submit" />
         <Row style={{ justifyContent: "center", gap: 4 }}>
           <T color={colors.onSurfaceSecondary}>Already have an account?</T>
-          <Pressable onPress={() => router.replace("/(auth)/login" as any)}>
+          <Pressable
+            onPress={() => router.replace({
+              pathname: "/(auth)/login",
+              ...(propertyId ? { params: { propertyId } } : {}),
+            })}
+          >
             <T weight="bold" color={colors.brand}>
               Sign in
             </T>

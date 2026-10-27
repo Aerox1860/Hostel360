@@ -138,7 +138,10 @@ export default function Explore() {
               testID={`hostel-${item.id}`}
               favorited={favIds.includes(item.id)}
               onToggleFav={() => toggleFav(item.id)}
-              onPress={() => router.push(`/hostel/${item.id}` as any)}
+              onPress={() => {
+                if (user) router.push(`/hostel/${item.id}` as any);
+                else router.push({ pathname: "/(auth)/login", params: { propertyId: item.id } });
+              }}
             />
           )}
         />

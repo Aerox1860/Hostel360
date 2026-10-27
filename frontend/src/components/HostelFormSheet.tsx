@@ -1,10 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { View } from "react-native";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { Sheet, Field, Btn, Chip, T, Row } from "@/src/components/ui";
 import { PhotoPicker } from "@/src/components/PhotoPicker";
 import { SignaturePicker } from "@/src/components/SignaturePicker";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
+import { PROPERTY_TYPES, PropertyType } from "@/src/utils/propertyType";
 import { colors, spacing, type } from "@/src/theme";
 
 const GENDERS = [
@@ -37,35 +40,55 @@ export function HostelFormSheet({
   const [area, setArea] = useState(initial?.area || "");
   const [gmap, setGmap] = useState(initial?.google_location || "");
   const [gender, setGender] = useState(initial?.gender || "pg");
+  const [propertyType, setPropertyType] = useState<PropertyType | "">(initial?.property_type || "");
   const [amenities, setAmenities] = useState<string[]>(initial?.amenities || ["Wi-Fi", "Food"]);
   const [photos, setPhotos] = useState<string[]>(initial?.photos || []);
   const [signature, setSignature] = useState<string | null>(initial?.signature || null);
+  const [upiId, setUpiId] = useState(initial?.upi_id || "");
+  const [upiQrCode, setUpiQrCode] = useState<string | null>(initial?.upi_qr_code || null);
   const [saving, setSaving] = useState(false);
 
   const toggleAmenity = (a: string) =>
     setAmenities((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
 
-  useEffect(() => {
-    if (visible) {
-      setName(initial?.name || "");
-      setPgName(initial?.pg_name || "");
-      setOwnerName(initial?.owner_name || "");
-      setMobile(initial?.mobile || "");
-      setAddress(initial?.address || "");
-      setCity(initial?.city || "");
-      setState(initial?.state || "");
-      setArea(initial?.area || "");
-      setGmap(initial?.google_location || "");
-      setGender(initial?.gender || "pg");
-      setAmenities(initial?.amenities || ["Wi-Fi", "Food"]);
-      setPhotos(initial?.photos || []);
-      setSignature(initial?.signature || null);
+  const pickUpiQr = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      toast.show("Photo access is needed to add your UPI QR code", "error");
+      return;
     }
-  }, [visible, initial]);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        base64: true,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+      if (result.canceled) return;
+      const image = result.assets[0];
+      const contentType = image.mimeType?.toLowerCase();
+      if (!image.base64 || !["image/jpeg", "image/png", "image/webp"].includes(contentType || "")) {
+        toast.show("Choose a JPG, PNG, or WebP QR image", "error");
+        return;
+      }
+      const data = `data:${contentType};base64,${image.base64}`;
+      if (data.length > 1_350_000) {
+        toast.show("UPI QR images must be 1 MB or smaller", "error");
+        return;
+      }
+      setUpiQrCode(data);
+    } catch (error) {
+      toast.show(error instanceof Error ? error.message : "Could not open photo library", "error");
+    }
+  };
 
   const save = async () => {
     if (!name || !ownerName || !mobile || !address || !city || !state) {
       toast.show("Fill all required fields", "error");
+      return;
+    }
+    if (!propertyType) {
+      toast.show("Select a property type", "error");
       return;
     }
     setSaving(true);
@@ -73,13 +96,15 @@ export function HostelFormSheet({
       if (initial?.id) {
         await api.put(`/owner/hostel/${initial.id}`, {
           name, pg_name: pgName, owner_name: ownerName, mobile, address, city, state,
-          area, google_location: gmap, gender, amenities, photos, signature,
+          area, google_location: gmap, gender, property_type: propertyType, amenities, photos, signature,
+          upi_id: upiId.trim() || null, upi_qr_code: upiQrCode,
           sharing_types: initial?.sharing_types || [],
         });
       } else {
         await api.post("/owner/hostel", {
           name, pg_name: pgName, owner_name: ownerName, mobile, address, city, state,
-          area, google_location: gmap, gender, amenities, photos, signature, sharing_types: [],
+          area, google_location: gmap, gender, property_type: propertyType, amenities, photos, signature, sharing_types: [],
+          upi_id: upiId.trim() || null, upi_qr_code: upiQrCode,
         });
       }
       toast.show(initial?.id ? "Hostel updated" : "Hostel submitted for verification");
@@ -112,6 +137,19 @@ export function HostelFormSheet({
         ))}
       </Row>
 
+      <T size={type.sm} weight="semibold" color={colors.onSurfaceSecondary}>Property Type *</T>
+      <Row style={{ gap: spacing.sm, flexWrap: "wrap" }}>
+        {PROPERTY_TYPES.map((option) => (
+          <Chip
+            key={option.value}
+            label={option.label}
+            active={propertyType === option.value}
+            onPress={() => setPropertyType(option.value)}
+            testID={`h-property-type-${option.value}`}
+          />
+        ))}
+      </Row>
+
       <T size={type.sm} weight="semibold" color={colors.onSurfaceSecondary}>Amenities</T>
       <Row style={{ gap: spacing.sm, flexWrap: "wrap" }}>
         {AMENITIES.map((a) => (
@@ -122,6 +160,12 @@ export function HostelFormSheet({
       <PhotoPicker photos={photos} onChange={setPhotos} testID="hostel-photos" />
 
       <SignaturePicker signature={signature} onChange={setSignature} testID="hostel-signature" />
+
+      <T size={type.sm} weight="semibold" color={colors.onSurfaceSecondary}>Manual UPI rent payments</T>
+      <Field label="UPI ID" value={upiId} onChangeText={setUpiId} placeholder="name@bank" autoCapitalize="none" testID="h-upi-id" />
+      {upiQrCode ? <Image source={{ uri: upiQrCode }} style={{ width: 160, height: 160, alignSelf: "center" }} contentFit="contain" /> : null}
+      <Btn title={upiQrCode ? "Change UPI QR code" : "Add UPI QR code"} variant="secondary" icon="qr-code-outline" onPress={pickUpiQr} testID="h-upi-qr" />
+      {upiQrCode ? <Btn title="Remove UPI QR code" variant="ghost" onPress={() => setUpiQrCode(null)} testID="h-upi-qr-remove" /> : null}
 
       <Btn title={initial ? "Save Changes" : "Submit for Verification"} onPress={save} loading={saving} testID="h-save" />
     </Sheet>

@@ -1,0 +1,125 @@
+name: Hostel360 API deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_deploy:
+        description: Confirm deployment of the reviewed main branch to production
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostel360-api-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out reviewed main branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install backend runtime and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements-deploy.txt pytest pytest-xdist
+
+      - name: Run isolated backend tests
+        working-directory: backend
+        run: python -m pytest -n 0 -q tests --ignore=tests/backend_test.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend unit tests
+        working-directory: frontend
+        run: node --test tests/adMediaUri.test.mjs tests/globalHistory.test.mjs tests/tenantDocumentImage.test.mjs
+
+  deploy:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && inputs.confirm_production_deploy == true
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Check out reviewed main branch
+        uses: actions/checkout@v4
+
+      - name: Package backend release without secrets or uploads
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/hostel360-release-${GITHUB_SHA}-${GITHUB_RUN_ID}.tar.gz"
+          tar -czf "$archive" -C "$GITHUB_WORKSPACE" \
+            backend/server.py \
+            backend/requirements-deploy.txt
+          tar -tzf "$archive"
+          if tar -tzf "$archive" | grep -E '(^|/)(\.env[^/]*|uploads)(/|$)'; then
+            echo "Release archive unexpectedly contains environment or upload data." >&2
+            exit 1
+          fi
+          echo "HOSTEL360_ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "HOSTEL360_RELEASE_ID=${GITHUB_SHA}-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/hostel360_deploy"
+          chmod 600 "$HOME/.ssh/hostel360_deploy"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload release archive
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          scp -i "$HOME/.ssh/hostel360_deploy" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$HOSTEL360_ARCHIVE" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/hostel360-release-${HOSTEL360_RELEASE_ID}.tar.gz"
+
+      - name: Deploy reviewed release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          ssh -i "$HOME/.ssh/hostel360_deploy" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/local/sbin/hostel360-deploy-release '${GITHUB_SHA}' '${GITHUB_RUN_ID}'"

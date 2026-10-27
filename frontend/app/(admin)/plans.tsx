@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { View, ScrollView, Pressable } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, Sheet, Btn, Field } from "@/src/components/ui";
+import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, Sheet, Btn, Field, Chip } from "@/src/components/ui";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, type, radius } from "@/src/theme";
@@ -15,6 +15,7 @@ export default function AdminPlans() {
   const [name, setName] = useState("");
   const [months, setMonths] = useState("");
   const [price, setPrice] = useState("");
+  const [gstRates, setGstRates] = useState<(2 | 18)[]>([]);
   const [features, setFeatures] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -32,24 +33,39 @@ export default function AdminPlans() {
 
   const openNew = () => {
     setEditing({});
-    setName(""); setMonths(""); setPrice(""); setFeatures("");
+    setName(""); setMonths(""); setPrice(""); setGstRates([]); setFeatures("");
   };
   const openEdit = (p: any) => {
     setEditing(p);
     setName(p.name); setMonths(String(p.duration_months)); setPrice(String(p.price));
+    const savedRates = Array.isArray(p.gst_rates)
+      ? p.gst_rates
+      : p.gst_rate === 2 || p.gst_rate === 18 ? [p.gst_rate] : [];
+    setGstRates(savedRates.filter((rate: number) => rate === 2 || rate === 18));
     setFeatures((p.features || []).join(", "));
   };
 
   const save = async () => {
-    if (!name || !months || !price) {
+    const durationMonths = Number(months);
+    const planPrice = Number(price);
+    if (!name.trim() || !months || !price) {
       toast.show("Fill name, duration and price", "error");
+      return;
+    }
+    if (gstRates.length === 0) {
+      toast.show("Select at least one GST rate for this plan", "error");
+      return;
+    }
+    if (!Number.isInteger(durationMonths) || durationMonths < 1 || !Number.isFinite(planPrice) || planPrice <= 0 || !/^\d+(\.\d{1,2})?$/.test(price.trim())) {
+      toast.show("Enter a positive whole-number duration and a positive INR price with up to 2 decimal places", "error");
       return;
     }
     setSaving(true);
     const body = {
-      name,
-      duration_months: parseInt(months) || 1,
-      price: parseFloat(price) || 0,
+      name: name.trim(),
+      duration_months: durationMonths,
+      price: planPrice,
+      gst_rates: gstRates,
       features: features.split(",").map((f) => f.trim()).filter(Boolean),
       active: editing?.active ?? true,
     };
@@ -97,7 +113,14 @@ export default function AdminPlans() {
                 <T size={type.sm} color={colors.onSurfaceSecondary}>{p.duration_months} month{p.duration_months > 1 ? "s" : ""}</T>
               </View>
               <View style={{ alignItems: "flex-end" }}>
-                <T weight="extrabold" size={type.xl} color={colors.brand}>${p.price}</T>
+                <T weight="extrabold" size={type.xl} color={colors.brand}>₹{Number(p.price).toFixed(2)}</T>
+                <T size={type.sm} color={p.gst_rates?.length || p.gst_rate === 2 || p.gst_rate === 18 ? colors.onSurfaceSecondary : colors.warning}>
+                  {p.gst_rates?.length
+                    ? `GST ${p.gst_rates.map((rate: number) => `${rate}%`).join(" + ")}`
+                    : p.gst_rate === 2 || p.gst_rate === 18
+                      ? `GST ${p.gst_rate}%`
+                      : "GST not set"}
+                </T>
                 <Badge label={p.active ? "Active" : "Inactive"} tone={p.active ? "success" : "neutral"} />
               </View>
             </Row>
@@ -126,7 +149,26 @@ export default function AdminPlans() {
       <Sheet visible={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit Plan" : "New Plan"}>
         <Field label="Plan name" value={name} onChangeText={setName} placeholder="e.g. Monthly Plan" autoCapitalize="words" testID="plan-name" />
         <Field label="Duration (months)" value={months} onChangeText={setMonths} placeholder="1" keyboardType="numeric" testID="plan-months" />
-        <Field label="Price (USD)" value={price} onChangeText={setPrice} placeholder="19.99" keyboardType="numeric" testID="plan-price" />
+        <Field label="Base price before GST (INR)" value={price} onChangeText={setPrice} placeholder="0.00" keyboardType="numeric" testID="plan-price" />
+        <T size={type.sm} weight="semibold" color={colors.onSurfaceSecondary}>GST rates (select either or both)</T>
+        <Row style={{ gap: spacing.sm }}>
+          {([
+            { rate: 2 as const, label: "2% GST" },
+            { rate: 18 as const, label: "18% GST" },
+          ]).map(({ rate, label }) => (
+            <Chip
+              key={rate}
+              label={label}
+              active={gstRates.includes(rate)}
+              onPress={() => setGstRates((current) =>
+                current.includes(rate)
+                  ? current.filter((selectedRate) => selectedRate !== rate)
+                  : [...current, rate].sort((a, b) => a - b),
+              )}
+              testID={`plan-gst-${rate}`}
+            />
+          ))}
+        </Row>
         <Field label="Features (comma separated)" value={features} onChangeText={setFeatures} placeholder="Verified badge, Priority support" multiline testID="plan-features" />
         <Btn title="Save Plan" onPress={save} loading={saving} testID="plan-save" />
       </Sheet>

@@ -5,6 +5,7 @@ import { T, Sheet, Btn, Row, Badge } from "@/src/components/ui";
 import { HostelFormSheet } from "@/src/components/HostelFormSheet";
 import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
 import { colors, spacing, radius, type } from "@/src/theme";
+import { propertyTypeLabel } from "@/src/utils/propertyType";
 
 export function HostelSwitcher() {
   const { hostels, activeId, activeHostel, setActive, refresh } = useOwnerHostel();
@@ -33,6 +34,7 @@ export function HostelSwitcher() {
           >
             <View style={{ flex: 1 }}>
               <T weight="bold">{h.name}</T>
+              <T size={type.sm} color={colors.brand}>{propertyTypeLabel(h.property_type)}</T>
               <T size={type.sm} color={colors.onSurfaceSecondary}>{[h.area, h.city].filter(Boolean).join(", ") || "No address"}</T>
             </View>
             <Row style={{ gap: spacing.sm }}>

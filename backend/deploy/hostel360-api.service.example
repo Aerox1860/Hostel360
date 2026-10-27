@@ -1,0 +1,26 @@
+[Unit]
+Description=Hostel360 FastAPI backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hostel360
+Group=hostel360
+WorkingDirectory=/opt/hostel360/current/backend
+EnvironmentFile=/etc/hostel360/hostel360.env
+ExecStart=/opt/hostel360/venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 60 --retry-connrefused --retry-delay 5 http://127.0.0.1:8000/readyz
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=600
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hostel360
+
+[Install]
+WantedBy=multi-user.target

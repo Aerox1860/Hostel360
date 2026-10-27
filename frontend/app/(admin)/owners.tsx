@@ -1,8 +1,7 @@
 import { useCallback, useState } from "react";
-import { View, FlatList, Pressable } from "react-native";
+import { View, FlatList } from "react-native";
 import { useFocusEffect } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn } from "@/src/components/ui";
+import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field } from "@/src/components/ui";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, type, radius } from "@/src/theme";
@@ -12,6 +11,8 @@ export default function AdminOwners() {
   const [owners, setOwners] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState<any>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetMode, setResetMode] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -25,13 +26,17 @@ export default function AdminOwners() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const act = async (action: string) => {
+  const act = async (action: string, newPassword?: string) => {
     if (!sel) return;
     try {
-      const res = await api.post<{ new_password?: string }>(`/admin/owners/${sel.id}/action`, { action });
-      if (action === "reset_password") toast.show(`New password: ${res.new_password}`, "info");
-      else toast.show("Owner updated");
+      await api.post<{ ok: boolean }>(`/admin/owners/${sel.id}/action`, {
+        action,
+        ...(newPassword ? { new_password: newPassword } : {}),
+      });
+      toast.show(action === "reset_password" ? "Owner password updated" : "Owner updated");
       setSel(null);
+      setResetPassword("");
+      setResetMode(false);
       load();
     } catch (e: any) {
       toast.show(e.message, "error");
@@ -69,7 +74,7 @@ export default function AdminOwners() {
         )}
       />
 
-      <Sheet visible={!!sel} onClose={() => setSel(null)} title={sel?.name}>
+      <Sheet visible={!!sel} onClose={() => { setSel(null); setResetPassword(""); setResetMode(false); }} title={sel?.name}>
         <T color={colors.onSurfaceSecondary}>{sel?.email}</T>
         <View style={{ gap: spacing.sm }}>
           {sel?.active ? (
@@ -82,7 +87,26 @@ export default function AdminOwners() {
           ) : (
             <Btn title="Block Owner" variant="danger" icon="lock-closed" onPress={() => act("block")} testID="owner-block" />
           )}
-          <Btn title="Reset Password" variant="ghost" icon="key" onPress={() => act("reset_password")} testID="owner-reset" />
+          {!resetMode ? (
+            <Btn title="Reset Password" variant="ghost" icon="key" onPress={() => setResetMode(true)} testID="owner-reset" />
+          ) : (
+            <>
+              <Field
+                label="New password"
+                value={resetPassword}
+                onChangeText={setResetPassword}
+                placeholder="At least 8 characters"
+                secureTextEntry
+                testID="owner-reset-password"
+              />
+              <Btn
+                title="Save new password"
+                onPress={() => act("reset_password", resetPassword)}
+                disabled={resetPassword.length < 8 || resetPassword.length > 72}
+                testID="owner-reset-confirm"
+              />
+            </>
+          )}
         </View>
       </Sheet>
     </Screen>
