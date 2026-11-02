@@ -5,9 +5,9 @@ import { User, useAuth } from "./state";
 
 export function Brand({ small = false }: { small?: boolean }) {
   return (
-    <Link className="brand" to="/" aria-label="Hostel 360 home">
+    <Link className="brand" to="/" aria-label="GoLiveHostel360 home">
       <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
-      {!small && <span className="brand-name">Hostel<span>360</span></span>}
+      {!small && <span className="brand-lockup"><span className="brand-name">GoLiveHostel<span>360</span></span><span className="brand-tagline">Live Smart. Stay Better.</span></span>}
     </Link>
   );
 }

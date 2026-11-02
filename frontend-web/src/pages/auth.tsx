@@ -164,7 +164,7 @@ export function RegisterPage() {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const propertyId = params.get("propertyId");
-  const [role, setRole] = useState<"tenant" | "owner">("tenant");
+  const [role, setRole] = useState<"tenant" | "owner">(params.get("role") === "owner" ? "owner" : "tenant");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [mobile, setMobile] = useState("");
