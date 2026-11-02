@@ -32,6 +32,62 @@ const landingFeatures = [
   { icon: "ϟ", title: "Fast Filing", description: "Keep hostel records and reports in one place.", to: "/owner/more", tone: "pink" },
 ];
 
+const ownerFaqs = [
+  { question: "Why should I use GoLiveHostel360?", answer: "It helps hostel owners organize hostel operations and manage important records in one platform." },
+  { question: "How can I manage student details?", answer: "Maintain student profiles and relevant hostel information." },
+  { question: "How can I track hostel expenses?", answer: "Record food, groceries, electricity, maintenance and other expenses." },
+  { question: "Can I manage food expenses?", answer: "Enter food product names, quantities and prices to maintain food expense records." },
+  { question: "Can I track payments and pending dues?", answer: "Manage available payment records and monitor pending amounts." },
+  { question: "Can I manage daily hostel operations?", answer: "Use the platform's available features to organize hostel activities." },
+];
+
+const tenantFaqs = [
+  { question: "Why should I choose a hostel using GoLiveHostel360?", answer: "It helps tenants access available hostel information and relevant details." },
+  { question: "How can I know my payment details?", answer: "Access payment information wherever the application currently provides this functionality." },
+  { question: "How can I contact the hostel owner?", answer: "Use the available contact options to communicate with hostel management." },
+  { question: "How can I raise a complaint?", answer: "Contact hostel management through the support options currently available." },
+  { question: "Can I get information about food and facilities?", answer: "Check the hostel information and facilities shared by the management." },
+];
+
+function LandingFaq() {
+  const [category, setCategory] = useState<"owners" | "tenants">("owners");
+  const [openQuestion, setOpenQuestion] = useState<number | null>(null);
+  const questions = category === "owners" ? ownerFaqs : tenantFaqs;
+  const categoryId = `faq-${category}`;
+
+  return (
+    <section className="landing-faq landing-reveal" id="faqs" aria-labelledby="faq-heading">
+      <header className="faq-heading">
+        <span className="faq-kicker">Helpful answers</span>
+        <h2 id="faq-heading">Frequently Asked Questions</h2>
+        <p>Find answers to common questions about GoLiveHostel360.</p>
+      </header>
+      <div className="faq-tabs" role="tablist" aria-label="FAQ category">
+        <button id="faq-tab-owners" className={category === "owners" ? "active" : ""} type="button" role="tab" aria-selected={category === "owners"} aria-controls="faq-list" onClick={() => { setCategory("owners"); setOpenQuestion(null); }}>Hostel Owners</button>
+        <button id="faq-tab-tenants" className={category === "tenants" ? "active" : ""} type="button" role="tab" aria-selected={category === "tenants"} aria-controls="faq-list" onClick={() => { setCategory("tenants"); setOpenQuestion(null); }}>Tenants / Students</button>
+      </div>
+      <div className="faq-list" id="faq-list" role="tabpanel" aria-labelledby={`faq-tab-${category}`}>
+        {questions.map((item, index) => {
+          const isOpen = openQuestion === index;
+          const answerId = `${categoryId}-answer-${index}`;
+          return (
+            <article className={`faq-item${isOpen ? " is-open" : ""}`} key={item.question}>
+              <h3>
+                <button className="faq-question" type="button" aria-expanded={isOpen} aria-controls={answerId} onClick={() => setOpenQuestion(isOpen ? null : index)}>
+                  <span>{item.question}</span><span className="faq-toggle" aria-hidden="true">{isOpen ? "−" : "+"}</span>
+                </button>
+              </h3>
+              <div className="faq-answer" id={answerId} aria-hidden={!isOpen}>
+                <div><p>{item.answer}</p></div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function LandingPage() {
   useEffect(() => {
     const items = document.querySelectorAll<HTMLElement>(".landing-reveal");
@@ -126,9 +182,11 @@ export function LandingPage() {
         <span className="about-rule" />
       </section>
 
+      <LandingFaq />
+
       <footer className="landing-footer" id="contact">
         <Brand />
-        <p>For hostel owners and students. Find a stay or manage your property with GoLiveHostel360.</p>
+        <div className="landing-contact"><b>Contact Us</b><a href="mailto:support@golivehostel360.com">support@golivehostel360.com</a><p>For hostel owners and students. Find a stay or manage your property with GoLiveHostel360.</p></div>
         <div className="row"><Link className="button secondary" to="/explore">Explore Hostels</Link><Link className="button primary" to="/login">Contact / Sign In</Link></div>
       </footer>
     </main>
