@@ -86,3 +86,6 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+/frontend-web/.env
+/frontend-web/.env.*
+!/frontend-web/.env.example
