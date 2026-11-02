@@ -4,7 +4,7 @@ import { AlertMessage, Button, ProtectedLayout, Brand } from "./ui";
 import { useAuth } from "./state";
 import { api } from "./api";
 import { AccountPage, ChangePasswordPage, LoginPage, RegisterPage } from "./pages/auth";
-import { ExplorePage, FavoritesPage, HostelDetailPage, TenantApplicationPage } from "./pages/public";
+import { ExplorePage, FavoritesPage, HostelDetailPage, LandingPage, TenantApplicationPage } from "./pages/public";
 import {
   OwnerDashboardPage, OwnerRoomsPage, OwnerTenantsPage, OwnerMoneyPage,
 } from "./pages/owner";
@@ -23,7 +23,8 @@ import { OwnerProvider } from "./owner-state";
 import { TenantPolicyContext, TenantPolicyContextValue, TenantPolicyStatus } from "./tenant-policy-state";
 
 function PublicLayout() {
-  return <><header className="topbar"><Brand /></header><Outlet /></>;
+  const location = useLocation();
+  return <>{location.pathname !== "/" && <header className="topbar"><Brand /></header>}<Outlet /></>;
 }
 
 function OwnerArea() {
@@ -70,8 +71,8 @@ function HomeRedirect() {
 
 export default function App() {
   return <Routes>
-    <Route path="/" element={<HomeRedirect />} />
     <Route element={<PublicLayout />}>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/explore" element={<ExplorePage />} />
       <Route path="/favorites" element={<FavoritesPage />} />
       <Route path="/hostel/:id" element={<HostelDetailPage />} />
