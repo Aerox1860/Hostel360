@@ -179,6 +179,10 @@ export function RegisterPage() {
       setError("Fill in all required fields.");
       return;
     }
+    if (mobile.trim() && !/^[6-9]\d{9}$/.test(mobile.trim())) {
+      setError("Enter a valid 10-digit mobile number.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -197,9 +201,9 @@ export function RegisterPage() {
     <AuthScaffold title="Create account">
       <form className="form" onSubmit={(event) => void submit(event)}>
         <Field label="I am a" value={role} onChange={(value) => setRole(value as "tenant" | "owner")} options={["tenant", "owner"]} />
-        <Field label="Full name" value={name} onChange={setName} placeholder="John Doe" required />
+        <Field label="Full name" value={name} onChange={setName} placeholder="Enter your full name" required />
         <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="you@example.com" required />
-        <Field label="Mobile" value={mobile} onChange={setMobile} type="tel" placeholder="9876543210" />
+        <Field label="Mobile Number" value={mobile} onChange={setMobile} type="tel" placeholder="Enter your mobile number" maxLength={10} />
         {role === "owner" && <Field label="Referral code (optional)" value={referral} onChange={setReferral} />}
         <Field label="Password" value={password} onChange={setPassword} type="password" placeholder="Min 6 characters" required />
         {error && <AlertMessage tone="error">{error}</AlertMessage>}
