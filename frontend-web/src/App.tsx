@@ -24,7 +24,8 @@ import { TenantPolicyContext, TenantPolicyContextValue, TenantPolicyStatus } fro
 
 function PublicLayout() {
   const location = useLocation();
-  return <>{location.pathname !== "/" && <header className="topbar"><Brand /></header>}<Outlet /></>;
+  const usesAuthScaffold = ["/login", "/register", "/change-password"].includes(location.pathname);
+  return <>{location.pathname !== "/" && !usesAuthScaffold && <header className="topbar"><Brand /></header>}<Outlet /></>;
 }
 
 function OwnerArea() {
