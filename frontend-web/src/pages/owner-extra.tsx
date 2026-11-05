@@ -613,6 +613,7 @@ export function OwnerMorePage() {
     }
   };
   const stats = reports || {};
+  const subscriptionPlans: JsonRecord[] = subscription?.plans || [];
   return <Page title="More" subtitle="Hostel tools, service requests and subscription">
     <ErrorBox error={error} />
     <div className="row">{["overview", "notices", "support", "enquiries", "subscription"].map((item) =>
@@ -627,7 +628,23 @@ export function OwnerMorePage() {
     {section === "enquiries" && <Card className="stack"><h2>Public enquiries</h2>{enquiries.map((item) => <article className="card" key={item.id}><b>{item.name} · {item.type}</b><p>{item.mobile} · {item.message}</p><p className="muted small">{item.created_at ? new Date(item.created_at).toLocaleString() : ""} {item.visit_date || ""}</p></article>)}{!enquiries.length && <p>No enquiries.</p>}</Card>}
     {section === "subscription" && <div className="stack">
       <Card className="stack"><h2>Current subscription</h2><p>{subscription?.subscription?.status || subscription?.status || "Free plan"}</p><p>{subscription?.subscription?.expires_at ? `Expires ${new Date(subscription.subscription.expires_at).toLocaleDateString()}` : ""}</p><p>Payments enabled: {subscription?.payments_enabled ? "Yes" : "No"}</p></Card>
-      {subscription?.plans?.map((plan: JsonRecord) => <Card className="spread" key={plan.id}><div><b>{plan.name}</b><p>{plan.duration_months} months · Base {money(plan.base_price_paise || 0)} · GST {plan.gst_rates?.join("% + ") || "not configured"}%</p><b>Total {money(plan.total_amount_paise || 0)}</b></div><Button onClick={() => void startCheckout(plan)} disabled={!subscription?.payments_enabled}>Choose plan</Button></Card>)}
+      {subscriptionPlans.length > 0 && <div className="grid subscription-plan-grid owner-plan-grid">
+        {subscriptionPlans.map((plan: JsonRecord) => {
+          return <Card className="stack subscription-plan-card owner-plan-card" key={plan.id}>
+            <div className="subscription-plan-heading">
+              <span className="subscription-plan-icon" aria-hidden="true">✦</span>
+              <div className="subscription-plan-title"><h3>{plan.name}</h3><p>{plan.duration_months} {Number(plan.duration_months) === 1 ? "month" : "months"}</p></div>
+            </div>
+            <div className="subscription-plan-price">{money(plan.base_price_paise || 0)}</div>
+            <p className="subscription-plan-tax">GST {plan.gst_rates?.length ? `${plan.gst_rates.join("% + ")}%` : "not configured"}{plan.gst_amount_paise != null ? ` · ${money(plan.gst_amount_paise)}` : ""}</p>
+            <div className="subscription-plan-total"><span>Total including GST</span><b>{money(plan.total_amount_paise || 0)}</b></div>
+            <div className="subscription-plan-features">
+              {(plan.features || []).map((feature: string) => <p key={feature}><span aria-hidden="true">✓</span>{feature}</p>)}
+            </div>
+            <Button onClick={() => void startCheckout(plan)} disabled={!subscription?.payments_enabled}>Choose Plan <span aria-hidden="true">→</span></Button>
+          </Card>;
+        })}
+      </div>}
       {(subscription?.history || []).length > 0 && <Card className="stack"><h2>Subscription history & invoices</h2>{(subscription?.history || []).map((item: JsonRecord) => <div className="spread" key={item.id}><span>{item.plan_name || item.plan_id} · {item.invoice_no || "—"} · ₹{item.amount} · {item.status}</span><Button kind="secondary" onClick={() => printInvoice(item)}>Download Invoice</Button></div>)}</Card>}
     </div>}
     {checkout && <div className="modal-backdrop"><section className="modal"><div className="spread"><h2>Review subscription payment</h2><Button kind="ghost" onClick={() => setCheckout(null)}>Close</Button></div>

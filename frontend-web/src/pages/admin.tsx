@@ -263,11 +263,26 @@ export function AdminPlansPage() {
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update plan status."); }
   };
   return <Page title="Subscription Plans" subtitle="Manage owner premium plans" actions={<Button onClick={openNew}>Add plan</Button>}>
-    <ErrorBox error={error} /><div className="grid">{plans.map((plan) => <Card className="stack" key={plan.id}>
-      <div className="spread"><div><h2>{plan.name}</h2><p>{plan.duration_months} months</p></div><div className="text-right"><b>₹{Number(plan.price).toFixed(2)}</b><p>GST {(plan.gst_rates || [plan.gst_rate]).filter(Boolean).join("% + ")}%</p><span className="badge">{plan.active ? "Active" : "Inactive"}</span></div></div>
-      {(plan.features || []).map((feature: string) => <p key={feature}>✓ {feature}</p>)}
-      <div className="row"><Button kind="secondary" onClick={() => openEdit(plan)}>Edit</Button><Button kind="ghost" onClick={() => void toggle(plan)}>{plan.active ? "Deactivate" : "Activate"}</Button></div>
-    </Card>)}</div>
+    <ErrorBox error={error} /><div className="grid subscription-plan-grid admin-plan-grid">{plans.map((plan) => {
+      const gstRates = (plan.gst_rates || [plan.gst_rate]).filter(Boolean);
+      return <Card className="stack subscription-plan-card admin-plan-card" key={plan.id}>
+        <div className="subscription-plan-heading">
+          <span className="subscription-plan-icon" aria-hidden="true">✦</span>
+          <div className="subscription-plan-title"><h2>{plan.name}</h2><p>{plan.duration_months} {Number(plan.duration_months) === 1 ? "month" : "months"}</p></div>
+          <span className={`badge ${plan.active ? "success" : "error"}`}>{plan.active ? "Active" : "Inactive"}</span>
+        </div>
+        <div className="subscription-plan-price">₹{Number(plan.price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+        <p className="subscription-plan-tax">GST {gstRates.length ? `${gstRates.join("% + ")}%` : "not configured"}</p>
+        <div className="subscription-plan-features">
+          {(plan.features || []).map((feature: string) => <p key={feature}><span aria-hidden="true">✓</span>{feature}</p>)}
+          {!plan.features?.length && <p className="subscription-empty-feature">No features listed</p>}
+        </div>
+        <div className="subscription-plan-actions">
+          <Button kind="secondary" onClick={() => openEdit(plan)}>✎ Edit</Button>
+          <Button onClick={() => void toggle(plan)}>{plan.active ? "◉ Deactivate" : "▶ Activate"}</Button>
+        </div>
+      </Card>;
+    })}</div>
     {editing && <div className="modal-backdrop"><section className="modal"><div className="spread"><h2>{editing.id ? "Edit plan" : "New plan"}</h2><Button kind="ghost" onClick={() => setEditing(null)}>Close</Button></div>
       <form className="form" onSubmit={(event) => void save(event)}><Field label="Plan name" value={name} onChange={setName} required /><Field label="Duration (months)" value={months} onChange={setMonths} type="number" min={1} required /><Field label="Base price before GST (INR)" value={price} onChange={setPrice} type="number" min={0.01} required />
         <div className="row">GST rates: {[2, 18].map((rate) => <label className="badge" key={rate}><input type="checkbox" checked={gstRates.includes(rate)} onChange={(event) => setGstRates((current) => event.target.checked ? [...current, rate].sort() : current.filter((value) => value !== rate))} /> {rate}%</label>)}</div>
