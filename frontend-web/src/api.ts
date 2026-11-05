@@ -57,7 +57,18 @@ async function request<T>(
   }
   if (!response.ok) {
     const detail = data?.detail;
-    const message = Array.isArray(detail)
+    const registrationPaths = [
+      "/owner/tenant-registration-qr",
+      "/owner/tenant-applications",
+      "/public/tenant-registration",
+      "/public/tenant-applications",
+    ];
+    const isUnavailableRegistrationRoute = response.status === 404
+      && detail === "Not Found"
+      && registrationPaths.some((route) => path.split("?")[0].startsWith(route));
+    const message = isUnavailableRegistrationRoute
+      ? "Tenant registration is not available on the connected server yet. Please contact support."
+      : Array.isArray(detail)
       ? detail.map((item: any) => item?.msg).filter(Boolean).join("; ") || "Request failed"
       : typeof detail === "string"
         ? detail

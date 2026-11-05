@@ -1,6 +1,6 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { api } from "../api";
+import { Link, useSearchParams } from "react-router-dom";
+import { ApiError, api } from "../api";
 import { AdvertisementSlot } from "../ads";
 import { useOwnerHostel } from "../owner-state";
 import { AlertMessage, Button, Card, Field, Page } from "../ui";
@@ -31,6 +31,25 @@ export function PropertyForm({ initial, onDone }: { initial?: Record<string, any
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const update = (key: string, value: unknown) => setValues((current) => ({ ...current, [key]: value }));
+  const addPhotos = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    const remaining = Math.max(0, 8 - values.photos.length);
+    if (!remaining || !files.length) return;
+    const validFiles = files.slice(0, remaining).filter((file) => {
+      if (["image/jpeg", "image/png", "image/webp"].includes(file.type)) return true;
+      setError("Choose JPG, PNG, or WebP images.");
+      return false;
+    });
+    const loaded = await Promise.all(validFiles.map((file) => new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    })));
+    if (loaded.some((photo) => photo === null)) setError("Could not read one or more selected photos.");
+    setValues((current) => ({ ...current, photos: [...current.photos, ...loaded.filter((photo): photo is string => photo !== null)].slice(0, 8) }));
+  };
   const selectImage = (event: ChangeEvent<HTMLInputElement>, key: "photos" | "signature" | "upi_qr_code") => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -81,16 +100,12 @@ export function PropertyForm({ initial, onDone }: { initial?: Record<string, any
     </div>
     <div><b>Amenities</b><div className="tag-row">{amenities.map((item) =>
       <label className="badge" key={item}><input type="checkbox" checked={values.amenities.includes(item)} onChange={(event) => update("amenities", event.target.checked ? [...values.amenities, item] : values.amenities.filter((value) => value !== item))} /> {item}</label>)}</div></div>
-    <input aria-label="Select hostel photos" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => {
-      const files = Array.from(event.target.files || []);
-      files.slice(0, 8 - values.photos.length).forEach((file) => {
-        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setError("Choose JPG, PNG, or WebP images."); return; }
-        const reader = new FileReader();
-        reader.onload = () => update("photos", [...values.photos, String(reader.result)].slice(0, 8));
-        reader.readAsDataURL(file);
-      });
-    }} />
-    <div className="tag-row">{values.photos.map((photo, index) => <img key={index} src={photo} alt={`Hostel photo ${index + 1}`} width="76" height="76" />)}</div>
+    <label className="field"><span>Hostel photos ({values.photos.length}/8)</span><input aria-label="Select hostel photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={values.photos.length >= 8} onChange={(event) => void addPhotos(event)} /></label>
+    <div className="tag-row">{values.photos.map((photo, index) => <div key={`${index}-${photo.slice(0, 24)}`} style={{ position: "relative", display: "inline-flex" }}>
+      <img src={photo} alt={`Hostel photo ${index + 1}`} width="76" height="76" style={{ objectFit: "cover", borderRadius: 8 }} />
+      <button type="button" aria-label={`Remove hostel photo ${index + 1}`} onClick={() => update("photos", values.photos.filter((_, photoIndex) => photoIndex !== index))}
+        style={{ position: "absolute", top: 3, right: 3, width: 24, height: 24, padding: 0, border: 0, borderRadius: "50%", color: "#fff", background: "var(--danger)", lineHeight: 1 }}>×</button>
+    </div>)}</div>
     <label className="field"><span>Owner signature (printed on tenant rent receipts)</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => selectImage(event, "signature")} /></label>
     <label className="field"><span>UPI QR code (JPG, PNG or WebP; up to 1 MB)</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => selectImage(event, "upi_qr_code")} /></label>
     {error && <AlertMessage tone="error">{error}</AlertMessage>}
@@ -230,6 +245,29 @@ export function OwnerRoomsPage() {
 type FoodProduct = { product_name: string; quantity: string; amount: string };
 const DEFAULT_EXPENSES = ["electricity", "water", "internet", "gas", "staff_salary", "food", "maintenance", "repairs", "other"];
 
+type TenantCreatePayload = {
+  hostel_id: string;
+  name: string;
+  mobile: string;
+  email?: string;
+  room_id: string;
+  bed_number: string;
+  joining_date: string;
+  aadhaar_number?: string;
+  documents: Record<string, string>;
+  monthly_rent: number;
+  security_deposit: number;
+  advance_amount: number;
+  create_login: boolean;
+  password?: string;
+  history_grant_id?: string;
+};
+
+type TenantCreateResponse = {
+  tenant: Record<string, any>;
+  login_password?: string | null;
+};
+
 export function OwnerTenantsPage() {
   const { activeId } = useOwnerHostel();
   const [tenants, setTenants] = useState<Record<string, any>[]>([]);
@@ -284,12 +322,13 @@ export function OwnerTenantsPage() {
   const selectedRoom = rooms.find((item) => item.id === roomId);
   const addTenant = async (event: FormEvent) => {
     event.preventDefault();
-    if (!activeId || !name.trim() || !/^\+?[\d\s()-]{8,18}$/.test(mobile.trim()) || !roomId || !bed || !rent || !joiningDate) {
+    if (!activeId || !name.trim() || !/^\+?[\d\s()-]+$/.test(mobile.trim()) || mobile.replace(/\D/g, "").length !== 10 || !roomId || !bed || !rent || !joiningDate) {
       setError("Enter valid tenant contact details, select an available room and bed, and complete rent and joining date.");
       return;
     }
     if (aadhaar.trim() && !/^\d{12}$/.test(aadhaar.replace(/[\s-]/g, ""))) { setError("Enter a valid 12-digit Aadhaar number."); return; }
     if (aadhaar.trim() && !await checkAadhaar()) { setError("Aadhaar number is already registered or could not be checked."); return; }
+    if (createLogin && !email.trim()) { setError("Enter an email address to create a tenant login."); return; }
     if (createLogin && (password.length < 8 || password.length > 72)) { setError("Login passwords must be 8–72 characters."); return; }
     setBusy(true); setError("");
     const staged: string[] = [];
@@ -314,15 +353,23 @@ export function OwnerTenantsPage() {
         const response = await api.upload<{ upload_id: string }>(`/owner/tenant-documents?hostel_id=${encodeURIComponent(activeId)}&kind=${kind}`, file);
         refs[kind] = response.upload_id; staged.push(response.upload_id);
       }
-      await api.post("/owner/tenants", {
-        hostel_id: activeId, name: name.trim(), mobile: mobile.trim(), email: email.trim() || undefined,
+      const payload: TenantCreatePayload = {
+        hostel_id: activeId, name: name.trim(), mobile: mobile.trim(),
+        ...(email.trim() ? { email: email.trim() } : {}),
         room_id: roomId, bed_number: bed, joining_date: joiningDate,
         aadhaar_number: aadhaar.trim() || undefined, documents: refs,
         monthly_rent: Number(rent), security_deposit: Number(deposit) || 0, advance_amount: Number(advance) || 0,
         create_login: createLogin, ...(createLogin ? { password } : {}),
         history_grant_id: admissionGrantId || undefined,
-      });
-      setShowAdd(false); setName(""); setMobile(""); setEmail(""); setRoomId(""); setBed(""); setRent(""); setAadhaar(""); setHistoryCode(""); setHistoryGrantId(""); setHistoryReports([]); setDocuments({ aadhaar_front: null, aadhaar_back: null, selfie: null });
+      };
+      const result = await api.post<TenantCreateResponse>("/owner/tenants", payload);
+      setTenants((current) => [result.tenant, ...current.filter((tenant) => tenant.id !== result.tenant.id)]);
+      setShowAdd(false);
+      setName(""); setMobile(""); setEmail(""); setRoomId(""); setBed(""); setRent("");
+      setDeposit("0"); setAdvance("0"); setJoiningDate(new Date().toISOString().slice(0, 10));
+      setAadhaar(""); setAadhaarStatus(""); setHistoryCode(""); setHistoryGrantId(""); setHistoryReports([]);
+      setCreateLogin(false); setPassword("");
+      setDocuments({ aadhaar_front: null, aadhaar_back: null, selfie: null });
       await load();
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Could not add tenant.";
@@ -337,7 +384,13 @@ export function OwnerTenantsPage() {
       const result = await api.post<{ available: boolean }>(`/owner/tenants/check-aadhaar?hostel_id=${encodeURIComponent(activeId)}`, { aadhaar_number: aadhaar });
       setAadhaarStatus(result.available ? "Aadhaar number is available." : "This Aadhaar number is already registered.");
       return result.available;
-    } catch (reason) { setAadhaarStatus(reason instanceof Error ? reason.message : "Could not check Aadhaar."); return false; }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Could not check Aadhaar.";
+      setAadhaarStatus(reason instanceof ApiError && reason.status === 405
+        ? "The connected backend does not currently support Aadhaar availability checks. Update its deployment to the version that provides this endpoint."
+        : message);
+      return false;
+    }
   };
   const lookupHistory = async () => {
     if (!historyCode.trim()) { setHistoryError("Enter the one-time share code provided by the tenant."); return; }
@@ -499,7 +552,10 @@ export function OwnerTenantsPage() {
 
 export function OwnerMoneyPage() {
   const { activeId } = useOwnerHostel();
-  const [tab, setTab] = useState<"rent" | "approvals" | "expenses">("rent");
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const requestedPaymentId = searchParams.get("payment_id");
+  const [tab, setTab] = useState<"rent" | "approvals" | "expenses">(() => requestedTab === "approvals" ? "approvals" : "rent");
   const [payments, setPayments] = useState<Record<string, any>[]>([]);
   const [pending, setPending] = useState<Record<string, any>[]>([]);
   const [tenants, setTenants] = useState<Record<string, any>[]>([]);
@@ -539,6 +595,9 @@ export function OwnerMoneyPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load rent and expense records."); }
   }, [activeId]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (requestedTab === "approvals") setTab("approvals");
+  }, [requestedTab]);
   const collect = async (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(rentAmount);
@@ -593,6 +652,9 @@ export function OwnerMoneyPage() {
   };
   const collectTotal = payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const propertyExpenses = expenses.filter((item) => item.purpose === "property").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const visiblePending = requestedPaymentId
+    ? [...pending].sort((a, b) => Number(b.id === requestedPaymentId) - Number(a.id === requestedPaymentId))
+    : pending;
   return <Page title="Rent & Expenses" actions={<Button onClick={() => setShowExpense(true)}>Add Expense</Button>}>
     <OwnerError value={error} />
     <div className="row">{(["rent", "approvals", "expenses"] as const).map((item) => <Button key={item} kind={tab === item ? "primary" : "secondary"} onClick={() => setTab(item)}>{item === "approvals" ? `Approvals (${pending.length})` : item}</Button>)}</div>
@@ -601,7 +663,7 @@ export function OwnerMoneyPage() {
       <Card className="stack"><h2>Pending dues</h2>{tenants.filter((item) => item.payment_status === "due").map((tenant) => <div className="spread" key={tenant.id}><span>{tenant.name} · Room {tenant.room_number} · ₹{tenant.monthly_rent}</span><Button kind="secondary" onClick={() => { setTenantId(tenant.id); setRentAmount(String(tenant.monthly_rent)); setShowRent(true); }}>Collect</Button></div>)}{!tenants.some((item) => item.payment_status === "due") && <p>No pending dues.</p>}</Card>
       <Card className="stack"><h2>Payment history</h2>{payments.map((payment) => <div className="spread" key={payment.id}><div><b>{payment.tenant_name}</b><p className="muted small">{payment.receipt_no ? `Receipt ${payment.receipt_no}` : `UPI ref ${payment.upi_reference || "—"}`} · {payment.method} · {payment.date ? new Date(payment.date).toLocaleDateString() : ""}</p>{payment.rejection_reason && <p className="badge error">{payment.rejection_reason}</p>}</div><b>₹{payment.amount}</b></div>)}{!payments.length && <p>No payments yet.</p>}</Card>
     </div>}
-    {tab === "approvals" && <Card className="stack"><h2>Verify UPI transfers against bank records</h2>{pending.map((payment) => <article className="card stack" key={payment.id}>
+    {tab === "approvals" && <Card className="stack"><h2>Verify UPI transfers against bank records</h2>{visiblePending.map((payment) => <article className="card stack" key={payment.id}>
       <div className="spread"><b>{payment.tenant_name}</b><b>₹{payment.amount}</b></div><p>{payment.date ? new Date(payment.date).toLocaleDateString() : ""} · {payment.method?.replaceAll("_", " ")} · Room {payment.room_number}</p><p>UPI reference: {payment.upi_reference}</p>
       <AlertMessage tone="info">This is a tenant-reported payment and has not been verified.</AlertMessage>
       {payment.evidence_id && <Button kind="secondary" onClick={async () => {

@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "./api";
 import { User, useAuth } from "./state";
@@ -169,6 +169,8 @@ const menus: Record<User["role"], { label: string; path: string }[]> = {
 export function ProtectedLayout({ role }: { role: User["role"] }) {
   const { user, loading, logout } = useAuth();
   const location = useLocation();
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  useEffect(() => { setNavigationOpen(false); }, [location.pathname]);
   if (loading) return <div className="centered">Loading your Hostel360 account…</div>;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   if (user.must_change_password && location.pathname !== "/change-password") return <Navigate to="/change-password" replace />;
@@ -176,19 +178,23 @@ export function ProtectedLayout({ role }: { role: User["role"] }) {
 
   return (
     <div className="app-shell">
-      <header className="topbar"><Brand /><div className="account-chip">{user.name || user.email}<Button kind="ghost" onClick={logout}>Log out</Button></div></header>
+      <header className="topbar">
+        <div className="topbar-brand"><button className="mobile-menu-toggle" type="button" aria-label={navigationOpen ? "Close navigation" : "Open navigation"} aria-expanded={navigationOpen} aria-controls="primary-navigation" onClick={() => setNavigationOpen((open) => !open)}><span /><span /><span /></button><Brand /></div>
+        <div className="account-chip"><span className="account-name">{user.name || user.email}</span><Button kind="ghost" onClick={logout}>Log out</Button></div>
+      </header>
+      {navigationOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation" onClick={() => setNavigationOpen(false)} />}
       <div className="workspace">
-        <aside className="sidebar">
+        <aside className={`sidebar${navigationOpen ? " open" : ""}`}>
           <div className="sidebar-profile"><b>{user.name || user.email}</b><span>{role === "admin" ? "Administrator" : role === "owner" ? "Hostel owner" : "Tenant"}</span></div>
-          <nav aria-label={`${role} navigation`}>
-            {menus[role].map((item) => <Link key={item.path} className={location.pathname === item.path ? "active" : ""} to={item.path}>{item.label}</Link>)}
+          <nav id="primary-navigation" aria-label={`${role} navigation`}>
+            {menus[role].map((item) => <Link key={item.path} className={location.pathname === item.path || (item.path !== `/${role}` && location.pathname.startsWith(`${item.path}/`)) ? "active" : ""} to={item.path}>{item.label}</Link>)}
             {role === "owner" && <>
-              <Link to="/owner/tenant-registration">Tenant registration</Link>
-              <Link to="/owner/tenant-alerts">Alerts</Link>
-              <Link to="/owner/rules">Rules & Regulations</Link>
+              <Link className={location.pathname === "/owner/tenant-registration" ? "active" : ""} to="/owner/tenant-registration">Tenant registration</Link>
+              <Link className={location.pathname === "/owner/tenant-alerts" ? "active" : ""} to="/owner/tenant-alerts">Alerts</Link>
+              <Link className={location.pathname === "/owner/rules" ? "active" : ""} to="/owner/rules">Rules & Regulations</Link>
             </>}
             {role === "tenant" && <>
-              <Link to="/tenant/policy-review">Rules review</Link>
+              <Link className={location.pathname === "/tenant/policy-review" ? "active" : ""} to="/tenant/policy-review">Rules review</Link>
             </>}
           </nav>
           <button className="sidebar-logout" onClick={logout}>Log out</button>

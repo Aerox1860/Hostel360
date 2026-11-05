@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { AlertMessage, Button, Card, Field, Page } from "../ui";
 
@@ -76,7 +77,10 @@ export function AdminHostelsPage() {
     <div className="grid">{hostels.map((hostel) => <Card className="stack" key={hostel.id}>
       <div className="spread"><div><h2>{hostel.name}</h2><p>{hostel.owner_name} · {hostel.city}, {hostel.state}</p></div><span className="badge">{hostel.status}</span></div>
       <p>Verification: {hostel.verification_status || "Unverified"} · Site visit: {hostel.site_visit_status || "Pending"}</p>{hostel.premium_plan && <p>Plan: {hostel.premium_plan}</p>}
-      <Button kind="secondary" onClick={() => setSelected(hostel)}>Manage</Button>
+      <div className="row">
+        <Link className="button secondary" to={`/hostel/${encodeURIComponent(hostel.id)}`}>View</Link>
+        <Button kind="secondary" onClick={() => setSelected(hostel)}>Manage</Button>
+      </div>
     </Card>)}</div>{!hostels.length && <Card><p>No hostels match this filter.</p></Card>}
     {selected && <div className="modal-backdrop"><section className="modal"><div className="spread"><h2>{selected.name}</h2><Button kind="ghost" onClick={() => setSelected(null)}>Close</Button></div>
       <div className="stack">{[["approve", "Approve Hostel"], ["suspend", "Suspend Hostel"], ["reactivate", "Reactivate Hostel"], ["reject", "Reject Hostel"]].map(([key, label]) => <Button key={key} kind={key === "reject" ? "danger" : "secondary"} onClick={() => void action(key)} disabled={busy}>{label}</Button>)}

@@ -383,17 +383,24 @@ export function TenantApplicationPage() {
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+  const [joiningDate, setJoiningDate] = useState("");
   const [preferences, setPreferences] = useState("");
   const [loading, setLoading] = useState(Boolean(token));
+  const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    setHostel(null);
+    setSubmitted(false);
+    setError("");
     if (!token) {
       setError("This registration link is invalid or incomplete.");
       setLoading(false);
       return;
     }
+    setLoading(true);
     api.getPublic<{ hostel: NonNullable<typeof hostel> }>(`/public/tenant-registration?token=${encodeURIComponent(token)}`)
       .then((result) => setHostel(result.hostel))
       .catch((reason) => setError(reason instanceof Error ? reason.message : "This registration link is unavailable."))
@@ -402,17 +409,25 @@ export function TenantApplicationPage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || !/^\+?[\d\s()-]+$/.test(mobile.trim()) || mobile.replace(/\D/g, "").length !== 10) {
-      setError("Enter your full name and a valid 10-digit mobile number.");
+    if (busy) return;
+    if (!name.trim() || !address.trim() || !joiningDate || !/^\+?[\d\s()-]+$/.test(mobile.trim()) || mobile.replace(/\D/g, "").length !== 10) {
+      setError("Enter your full name, address, joining date, and a valid 10-digit mobile number.");
       return;
     }
+    setBusy(true);
     setError("");
     try {
       await api.postPublic(`/public/tenant-applications?token=${encodeURIComponent(token)}`, {
-        name: name.trim(), mobile: mobile.trim(), email: email.trim() || undefined, preferences: preferences.trim() || undefined,
+        name: name.trim(),
+        mobile: mobile.trim(),
+        email: email.trim() || undefined,
+        address: address.trim(),
+        joining_date: joiningDate,
+        preferences: preferences.trim() || undefined,
       });
       setSubmitted(true);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not submit your application."); }
+    finally { setBusy(false); }
   };
 
   return <Page title="Tenant registration" subtitle={hostel?.name || "Hostel360"}>
@@ -423,11 +438,14 @@ export function TenantApplicationPage() {
       <p>Applying to {hostel.name} · {[hostel.area, hostel.city].filter(Boolean).join(", ")}</p>
       <p className="muted">Submit your details for owner review. A room is not reserved by this application.</p>
       <form className="form" onSubmit={(event) => void submit(event)}>
-        <Field label="Full name" value={name} onChange={setName} required />
-        <Field label="Mobile" value={mobile} onChange={setMobile} type="tel" required />
+        <Field label="Full name" value={name} onChange={setName} maxLength={120} required />
+        <Field label="Mobile" value={mobile} onChange={setMobile} type="tel" maxLength={20} required />
         <Field label="Email (optional)" value={email} onChange={setEmail} type="email" />
-        <Field label="Room or stay preferences (optional)" value={preferences} onChange={setPreferences} multiline maxLength={500} placeholder="Preferred sharing, move-in timing, or other requests" />
-        <Button type="submit">Submit application</Button>
+        <Field label="Address" value={address} onChange={setAddress} multiline maxLength={500} required />
+        <Field label="Joining date" value={joiningDate} onChange={setJoiningDate} type="date" required />
+        <Field label="Room or bed preferences (optional)" value={preferences} onChange={setPreferences} multiline maxLength={500} placeholder="Preferred room, bed, sharing, or other requests" />
+        <p className="muted small">Identity details are collected securely by the hostel owner after approval.</p>
+        <Button type="submit" disabled={busy}>{busy ? "Submitting…" : "Submit application"}</Button>
       </form>
     </Card> : null}
   </Page>;

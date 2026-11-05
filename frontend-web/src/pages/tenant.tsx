@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../state";
@@ -70,6 +70,30 @@ function validDate(value: string) {
   return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
 }
 
+function escapeReceiptHtml(value: unknown) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  })[character] || character);
+}
+
+function receiptDate(value?: string, options?: Intl.DateTimeFormatOptions) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-IN", options);
+}
+
+function receiptImageSource(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const source = value.trim();
+  if (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\s]+$/i.test(source)) return source;
+  try {
+    const url = new URL(source);
+    return url.protocol === "https:" || url.protocol === "http:" ? source : "";
+  } catch {
+    return "";
+  }
+}
+
 export function TenantPaymentsPage() {
   const resource = useTenantResource<{ payments: JsonRecord[]; hostel: JsonRecord; tenant: JsonRecord }>("/tenant/payments", { payments: [], hostel: {}, tenant: {} });
   const { payments, hostel, tenant } = resource.data;
@@ -78,6 +102,7 @@ export function TenantPaymentsPage() {
   const [reference, setReference] = useState("");
   const [method, setMethod] = useState("phonepe");
   const [screenshot, setScreenshot] = useState<File | null>(null);
+  const screenshotInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -105,7 +130,9 @@ export function TenantPaymentsPage() {
         amount: Number(amount), payment_date: paymentDate.trim(), upi_reference: reference.trim(), method,
         ...(screenshot_data ? { screenshot_data, screenshot_name: screenshot?.name || "upi-payment.png", screenshot_content_type: screenshot?.type } : {}),
       });
-      setReference(""); setScreenshot(null); await resource.load();
+      setReference(""); setScreenshot(null);
+      if (screenshotInput.current) screenshotInput.current.value = "";
+      await resource.load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not submit payment."); }
     finally { setBusy(false); }
   };
@@ -114,11 +141,82 @@ export function TenantPaymentsPage() {
     try { await navigator.clipboard.writeText(hostel.upi_id); }
     catch { setError("Clipboard access is unavailable in this browser."); }
   };
+  const removeScreenshot = () => {
+    setScreenshot(null);
+    if (screenshotInput.current) screenshotInput.current.value = "";
+  };
   const openUpi = () => {
     if (!hostel?.upi_id) return setError("Ask the hostel owner to configure a UPI ID.");
     const scheme = { phonepe: "phonepe://pay", google_pay: "tez://upi/pay", paytm: "paytmmp://pay", other_upi: "upi://pay" }[method] || "upi://pay";
     const params = new URLSearchParams({ pa: hostel.upi_id, pn: hostel.name || hostel.pg_name || "Hostel", am: amount, cu: "INR", tn: "Hostel rent" });
     window.location.href = `${scheme}?${params}`;
+  };
+  const printReceipt = (payment: JsonRecord) => {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) { setError("The browser blocked the receipt window. Allow pop-ups and retry."); return; }
+    const amount = payment.amount == null || !Number.isFinite(Number(payment.amount)) ? "—" : String(payment.amount);
+    const type = String(payment.type || "rent");
+    const methodLabel = String(payment.method || "cash").replaceAll("_", " ").toUpperCase();
+    const tenantName = tenant?.name || "Tenant";
+    const hostelName = hostel?.pg_name || hostel?.name || "Hostel";
+    const address = [hostel?.address, hostel?.city].filter(Boolean).join(", ");
+    const signature = receiptImageSource(hostel?.signature);
+    const rentAdvance = type === "rent" && Number(tenant?.advance_amount) > 0
+      ? `<tr><td>Advance Amount</td><td class="amount">₹${escapeReceiptHtml(tenant.advance_amount)}</td></tr>`
+      : "";
+    const signatureMarkup = signature
+      ? `<img class="signature-image" src="${escapeReceiptHtml(signature)}" alt="Owner signature">`
+      : `<span class="signature-name">${escapeReceiptHtml(hostel?.owner_name || "Owner")}</span>`;
+    const roomDetails = tenant?.room_number
+      ? ` (Room ${escapeReceiptHtml(tenant.room_number)}${tenant?.bed_number ? `, Bed ${escapeReceiptHtml(tenant.bed_number)}` : ""})`
+      : "";
+    const month = receiptDate(payment.date, { month: "long", year: "numeric" });
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Rent receipt</title><style>
+        body{font-family:Arial,sans-serif;color:#1a1d1a;padding:32px;background:#fff}
+        .head{text-align:center;border-bottom:3px solid #2c5e3e;padding-bottom:16px}
+        .hostel{font-size:24px;font-weight:800;color:#2c5e3e}
+        .muted{color:#6a706a;font-size:13px}
+        .title{text-align:center;margin:22px 0 6px;font-size:16px;font-weight:800;letter-spacing:2px}
+        .paid{text-align:center;color:#166534;font-weight:700}
+        .meta{display:flex;justify-content:space-between;font-size:13px;color:#6a706a;margin-top:12px}
+        .line{margin-top:20px;font-size:15px}
+        table{width:100%;border-collapse:collapse;margin-top:20px}
+        td{padding:12px 8px;border-bottom:1px solid #e5e7e5;font-size:14px}
+        .amount{text-align:right}
+        .total td{border-top:2px solid #2c5e3e;border-bottom:0;font-size:18px;font-weight:800;color:#2c5e3e}
+        .sign{margin-top:60px;display:flex;justify-content:flex-end;text-align:center}
+        .signature-image{height:64px;max-width:220px;object-fit:contain;display:block;margin:0 auto 4px}
+        .signature-name{display:inline-block;font-size:20px;border-bottom:1px solid #1a1d1a;padding:0 24px 4px}
+        .footer{margin-top:36px;border-top:1px solid #e5e7e5;padding-top:14px;font-size:12px;color:#6a706a;text-align:center}
+        @media print{body{padding:16px}}
+      </style></head><body>
+        <header class="head"><div class="hostel">${escapeReceiptHtml(hostelName)}</div>
+          <div class="muted">${escapeReceiptHtml(address)}</div>
+          <div class="muted">Contact: ${escapeReceiptHtml(hostel?.mobile || "—")}</div></header>
+        <h1 class="title">RENT RECEIPT</h1><div class="paid">PAID</div>
+        <div class="meta"><span>Receipt No: <b>${escapeReceiptHtml(payment.receipt_no || "—")}</b></span><span>Date: ${escapeReceiptHtml(receiptDate(payment.date, { day: "2-digit", month: "short", year: "numeric" }))}</span></div>
+        <p class="line">Received with thanks from <b>${escapeReceiptHtml(tenantName)}</b>${roomDetails}</p>
+        <p class="line">For the month of <b>${escapeReceiptHtml(month)}</b> towards <b>${escapeReceiptHtml(type.toUpperCase())}</b>, paid via <b>${escapeReceiptHtml(methodLabel)}</b>.</p>
+        <table><tbody><tr><td>${escapeReceiptHtml(`${type.charAt(0).toUpperCase()}${type.slice(1)}`)} Amount</td><td class="amount">₹${escapeReceiptHtml(amount)}</td></tr>
+          ${rentAdvance}<tr class="total"><td>Total Received</td><td class="amount">₹${escapeReceiptHtml(amount)}</td></tr></tbody></table>
+        <div class="sign"><div>${signatureMarkup}<div class="muted">For ${escapeReceiptHtml(hostelName)} · Authorised Signatory</div></div></div>
+        <footer class="footer">This is a system-generated rent receipt from Hostel 360.</footer>
+      </body></html>`;
+    try {
+      printWindow.opener = null;
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      window.setTimeout(() => {
+        try { printWindow.print(); }
+        catch { setError("Could not open the print dialog for this receipt."); }
+      }, 500);
+    } catch {
+      printWindow.close();
+      setError("Could not generate the receipt.");
+    }
   };
   const paidTotal = payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const pending = payments.find((item) => ["pending_owner_approval", "approval_processing"].includes(item.status));
@@ -136,13 +234,13 @@ export function TenantPaymentsPage() {
           <Field label="Paid amount (₹)" value={amount} onChange={setAmount} type="number" min={0.01} required />
           <Field label="Payment date" value={paymentDate} onChange={setPaymentDate} type="date" required />
           <Field label="UPI reference / transaction ID" value={reference} onChange={setReference} required />
-          <label className="field"><span>Payment screenshot (optional; JPG, PNG or WebP; up to 3 MB)</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setScreenshot(event.target.files?.[0] || null)} /></label>
-          {screenshot && <span className="muted">{screenshot.name}</span>}
+          <label className="field"><span>Payment screenshot (optional; JPG, PNG or WebP; up to 3 MB)</span><input ref={screenshotInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setScreenshot(event.target.files?.[0] || null)} /></label>
+          {screenshot && <div className="row"><span className="muted">{screenshot.name}</span><Button kind="ghost" onClick={removeScreenshot}>Remove screenshot</Button></div>}
           <Button type="submit" disabled={busy}>{busy ? "Submitting…" : "Submit payment for approval"}</Button>
         </form>
       </Card>
       <Card className="stack"><h2>Payment history</h2>{!payments.length ? <p>No payment records yet.</p> : <div className="table-scroll"><table><thead><tr><th>Date</th><th>Amount</th><th>Type</th><th>Method</th><th>Status</th><th>Receipt</th></tr></thead><tbody>
-        {payments.map((payment) => <tr key={payment.id}><td>{payment.date ? new Date(payment.date).toLocaleDateString() : "—"}</td><td>₹{payment.amount}</td><td>{payment.type}</td><td>{payment.method}</td><td><span className="badge">{payment.status}</span></td><td>{payment.status === "paid" && <Button kind="secondary" onClick={() => window.print()}>Print</Button>}</td></tr>)}
+        {payments.map((payment) => <tr key={payment.id}><td>{payment.date ? new Date(payment.date).toLocaleDateString() : "—"}</td><td>₹{payment.amount}</td><td>{payment.type}</td><td>{payment.method}</td><td><span className="badge">{payment.status}</span></td><td>{payment.status === "paid" && <Button kind="secondary" onClick={() => printReceipt(payment)}>Print receipt</Button>}</td></tr>)}
       </tbody></table></div>}</Card>
     </>}
   </Page>;
@@ -238,6 +336,7 @@ export function TenantHistorySharingPage() {
   };
   return <Page title="Global history sharing" subtitle="Your choice, your control">
     <ErrorBox error={error} />
+    {error && !loading && <Button kind="secondary" onClick={() => void load()}>Retry</Button>}
     {loading ? <p className="muted">Loading sharing preferences…</p> : <>
       <Card className="stack"><p>One-time codes let you share history with one owner. Automatic checks are only available for identity-verified accounts when you explicitly enable them. Reports are allegations unless their status says otherwise.</p>
         <label className="row"><input type="checkbox" checked={consent?.consented === true} onChange={(event) => void saveConsent(event.target.checked)} /><span>Enable one-time code sharing</span></label>

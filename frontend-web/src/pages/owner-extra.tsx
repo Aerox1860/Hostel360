@@ -1,10 +1,26 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useOwnerHostel } from "../owner-state";
+import { useAuth } from "../state";
 import { AlertMessage, Button, Card, Field, Page } from "../ui";
 import { PropertyForm } from "./owner";
 
 type JsonRecord = Record<string, any>;
+type TenantDocumentKind = "aadhaar_front" | "aadhaar_back" | "selfie";
+type ApplicantIdentity = { aadhaar_number: string; documents: Partial<Record<TenantDocumentKind, File>> };
+
+function escapeInvoiceHtml(value: unknown) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  })[character] || character);
+}
+
+function invoiceDate(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
 
 function ErrorBox({ error }: { error: string }) {
   return error ? <AlertMessage tone="error">{error}</AlertMessage> : null;
@@ -15,20 +31,36 @@ export function OwnerRegistrationPage() {
   const [registration, setRegistration] = useState<JsonRecord | null>(null);
   const [applications, setApplications] = useState<JsonRecord[]>([]);
   const [rooms, setRooms] = useState<JsonRecord[]>([]);
+  const [roomsLoaded, setRoomsLoaded] = useState(false);
   const [allocations, setAllocations] = useState<Record<string, { room_id: string; bed_number: string }>>({});
+  const [applicantIdentity, setApplicantIdentity] = useState<Record<string, ApplicantIdentity>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
-    if (!activeId) return;
+    if (!activeId) {
+      setRegistration(null); setApplications([]); setRooms([]); setRoomsLoaded(false); setError(""); setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setRoomsLoaded(false);
     const query = `hostel_id=${encodeURIComponent(activeId)}`;
-    try {
-      const [qr, appResult, roomResult] = await Promise.all([
-        api.get<{ registration: JsonRecord | null }>(`/owner/tenant-registration-qr?${query}`),
-        api.get<{ applications: JsonRecord[] }>(`/owner/tenant-applications?${query}`),
-        api.get<{ rooms: JsonRecord[] }>(`/owner/rooms?${query}`),
-      ]);
-      setRegistration(qr.registration); setApplications(appResult.applications); setRooms(roomResult.rooms); setError("");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load tenant registration."); }
+    const results = await Promise.allSettled([
+      api.get<{ registration: JsonRecord | null }>(`/owner/tenant-registration-qr?${query}`),
+      api.get<{ applications: JsonRecord[] }>(`/owner/tenant-applications?${query}`),
+      api.get<{ rooms: JsonRecord[] }>(`/owner/rooms?${query}`),
+    ]);
+    const errors: string[] = [];
+    if (results[0].status === "fulfilled") setRegistration(results[0].value.registration);
+    else errors.push(`Registration QR: ${results[0].reason instanceof Error ? results[0].reason.message : "Could not load registration QR."}`);
+    if (results[1].status === "fulfilled") setApplications(results[1].value.applications || []);
+    else errors.push(`Tenant applications: ${results[1].reason instanceof Error ? results[1].reason.message : "Could not load tenant applications."}`);
+    if (results[2].status === "fulfilled") {
+      setRooms(results[2].value.rooms || []);
+      setRoomsLoaded(true);
+    } else errors.push(`Room availability: ${results[2].reason instanceof Error ? results[2].reason.message : "Could not load room availability."}`);
+    setError(errors.join(" "));
+    setLoading(false);
   }, [activeId]);
   useEffect(() => { void load(); }, [load]);
   const qrAction = async (action: "generate" | "revoke") => {
@@ -55,13 +87,46 @@ export function OwnerRegistrationPage() {
     finally { setBusy(""); }
   };
   const allocate = async (application: JsonRecord) => {
+    if (!roomsLoaded) { setError("Room availability is not loaded. Refresh and retry before allocating."); return; }
     const selection = allocations[application.id] || { room_id: "", bed_number: "" };
     if (!selection.room_id || !selection.bed_number) { setError("Select an available room and bed before allocating."); return; }
+    const identity = applicantIdentity[application.id] || { aadhaar_number: "", documents: {} };
+    const aadhaar = identity.aadhaar_number.replace(/[\s-]/g, "");
+    if (identity.aadhaar_number && !/^\d{12}$/.test(aadhaar)) { setError("Enter a valid 12-digit Aadhaar number or clear the field."); return; }
     setBusy(application.id); setError("");
+    const staged: string[] = [];
     try {
-      await api.post(`/owner/tenant-applications/${encodeURIComponent(application.id)}/allocation`, selection);
+      const documentRefs: Partial<Record<TenantDocumentKind, string>> = {};
+      if (application.status !== "allocating") {
+        for (const kind of ["aadhaar_front", "aadhaar_back", "selfie"] as const) {
+          const file = identity.documents[kind];
+          if (!file) continue;
+          if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 10 * 1024 * 1024) {
+            throw new Error("Identity documents must be JPG, PNG or WebP images no larger than 10 MB.");
+          }
+          const result = await api.upload<{ upload_id: string }>(`/owner/tenant-documents?hostel_id=${encodeURIComponent(activeId)}&kind=${kind}`, file);
+          documentRefs[kind] = result.upload_id;
+          staged.push(result.upload_id);
+        }
+      }
+      await api.post(`/owner/tenant-applications/${encodeURIComponent(application.id)}/allocation`, {
+        ...selection,
+        ...(application.status === "allocating" ? {} : {
+          aadhaar_number: aadhaar || undefined,
+          documents: documentRefs,
+        }),
+      });
+      setApplicantIdentity((current) => {
+        const next = { ...current };
+        delete next[application.id];
+        return next;
+      });
       await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Allocation failed. The application remains available to retry."); }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Allocation failed. The application remains available to retry.";
+      const cleanup = await Promise.allSettled(staged.map((id) => api.delete(`/owner/tenant-documents/${encodeURIComponent(id)}`)));
+      setError(cleanup.some((result) => result.status === "rejected") ? `${message} Some temporary identity uploads could not be cleaned up.` : message);
+    }
     finally { setBusy(""); }
   };
   const copyLink = async () => {
@@ -91,12 +156,35 @@ export function OwnerRegistrationPage() {
   const shareLink = async () => {
     if (!registration?.registration_url) return;
     if (!navigator.share) { setError("Link sharing is not available in this browser; use Copy link instead."); return; }
-    try { await navigator.share({ title: activeHostel?.name || "Tenant registration", url: registration.registration_url }); }
+    const title = activeHostel?.name || "Tenant registration";
+    if (navigator.canShare && registration.qr_data_uri) {
+      try {
+        const response = await fetch(registration.qr_data_uri);
+        const blob = await response.blob();
+        const qrFile = new File([blob], "hostel360-tenant-registration.png", { type: blob.type || "image/png" });
+        if (navigator.canShare({ files: [qrFile] })) {
+          try {
+            await navigator.share({
+              title,
+              text: `Scan this QR code or open the tenant registration link: ${registration.registration_url}`,
+              files: [qrFile],
+            });
+            return;
+          } catch (reason) {
+            if (reason instanceof Error && reason.name === "AbortError") return;
+          }
+        }
+      } catch {
+        // Fall back to sharing the public registration link.
+      }
+    }
+    try { await navigator.share({ title, url: registration.registration_url }); }
     catch (reason) { if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message); }
   };
   const freeBeds = (room: JsonRecord) => (room.beds || []).filter((bed: JsonRecord) => bed.status !== "occupied" && !bed.tenant_id);
   return <Page title="Tenant registration" subtitle={`${activeHostel?.name || "Selected hostel"} · QR links and applications`}>
     <ErrorBox error={error} />
+    <div className="row"><Button kind="secondary" onClick={() => void load()} disabled={loading}>{loading ? "Refreshing…" : "Refresh registration and applications"}</Button></div>
     <Card className="stack"><h2>Registration QR</h2><p>Create a secure registration link for prospective tenants. Generating a new QR revokes the previous one.</p>
       {registration ? <>
         <img className="registration-qr" src={registration.qr_data_uri} alt={`Tenant registration QR for ${activeHostel?.name || "hostel"}`} />
@@ -107,12 +195,17 @@ export function OwnerRegistrationPage() {
     <Card className="stack"><h2>Tenant applications ({applications.length})</h2>{applications.map((application) => <article className="card stack" key={application.id}>
       <div className="spread"><b>{application.name}</b><span className="badge">{application.status}</span></div>
       <p>{application.mobile} · {application.email || "No email"} · {application.preferences || "No preferences"}</p><p className="muted small">{application.created_at ? new Date(application.created_at).toLocaleString() : ""}</p>
+      {(application.address || application.joining_date) && <p>{application.address || "No address provided"}{application.joining_date ? ` · Joining ${application.joining_date}` : ""}</p>}
       {application.status === "pending" && <div className="row"><Button onClick={() => void updateApplication(application, "approved")} disabled={!!busy}>Approve</Button><Button kind="danger" onClick={() => void updateApplication(application, "rejected")} disabled={!!busy}>Reject</Button></div>}
       {["approved", "allocating"].includes(application.status) && <div className="stack">
         <div className="form grid-form">
           <Field label="Room" value={allocations[application.id]?.room_id || application.allocation_room_id || ""} onChange={(value) => setAllocations((current) => ({ ...current, [application.id]: { room_id: value, bed_number: "" } }))} options={rooms.filter((room) => freeBeds(room).length).map((room) => room.id)} optionLabels={Object.fromEntries(rooms.map((room) => [room.id, `Room ${room.room_number}`]))} />
           <Field label="Bed" value={allocations[application.id]?.bed_number || application.allocation_bed_number || ""} onChange={(value) => setAllocations((current) => ({ ...current, [application.id]: { room_id: current[application.id]?.room_id || application.allocation_room_id || "", bed_number: value } }))} options={freeBeds(rooms.find((room) => room.id === (allocations[application.id]?.room_id || application.allocation_room_id)) || {}).map((bed: JsonRecord) => String(bed.bed_number))} />
-        </div><Button onClick={() => void allocate(application)} disabled={!!busy}>Allocate and create tenant</Button>
+        </div>{!roomsLoaded && <p className="muted small">Room availability must load before allocation.</p>}
+        <p className="muted small">Collect identity details securely after approval. Uploaded documents are encrypted by the existing tenant-document service.</p>
+        <Field label="Aadhaar number (optional)" value={applicantIdentity[application.id]?.aadhaar_number || ""} onChange={(value) => setApplicantIdentity((current) => ({ ...current, [application.id]: { aadhaar_number: value, documents: current[application.id]?.documents || {} } }))} maxLength={14} />
+        {(["aadhaar_front", "aadhaar_back", "selfie"] as const).map((kind) => <label className="field" key={kind}><span>{kind.replace("_", " ")} (optional)</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setApplicantIdentity((current) => ({ ...current, [application.id]: { aadhaar_number: current[application.id]?.aadhaar_number || "", documents: { ...current[application.id]?.documents, [kind]: event.target.files?.[0] } } }))} /></label>)}
+        <Button onClick={() => void allocate(application)} disabled={!!busy || !roomsLoaded}>{busy === application.id ? "Creating tenant…" : "Allocate and create tenant"}</Button>
       </div>}
     </article>)}{!applications.length && <p>No applications yet.</p>}</Card>
   </Page>;
@@ -120,8 +213,12 @@ export function OwnerRegistrationPage() {
 
 export function OwnerAlertsPage() {
   const { activeId } = useOwnerHostel();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<JsonRecord[]>([]);
   const [error, setError] = useState("");
+  const [selectedReport, setSelectedReport] = useState<{ report: JsonRecord; grantId: string | null } | null>(null);
+  const [openingReportId, setOpeningReportId] = useState("");
+  const [openingEvidenceId, setOpeningEvidenceId] = useState("");
   const load = useCallback(async () => {
     if (!activeId) return;
     try {
@@ -136,11 +233,88 @@ export function OwnerAlertsPage() {
       setNotifications((current) => current.map((item) => item.id === id ? { ...item, read_at: new Date().toISOString() } : item));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not mark notification read."); }
   };
+  const openReport = async (notification: JsonRecord) => {
+    if (!notification.report_id) return;
+    setOpeningReportId(notification.id); setError("");
+    try {
+      const grantId = notification.grant_id || null;
+      const query = grantId ? `?grant_id=${encodeURIComponent(grantId)}` : "";
+      const result = await api.get<{ report: JsonRecord }>(
+        `/owner/tenant-history/reports/${encodeURIComponent(notification.report_id)}${query}`,
+      );
+      setSelectedReport({ report: result.report, grantId });
+      if (!notification.read_at) await markRead(notification.id);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not open report details."); }
+    finally { setOpeningReportId(""); }
+  };
+  const openEvidence = async (evidence: JsonRecord) => {
+    if (!selectedReport || !evidence.id || openingEvidenceId) return;
+    setOpeningEvidenceId(evidence.id); setError("");
+    try {
+      const query = selectedReport.grantId ? `?grant_id=${encodeURIComponent(selectedReport.grantId)}` : "";
+      const blob = await api.getBlob(
+        `/owner/tenant-reports/${encodeURIComponent(selectedReport.report.id)}/evidence/${encodeURIComponent(evidence.id)}${query}`,
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = String(evidence.filename || "").replace(/[^A-Za-z0-9._-]/g, "_") || "tenant-report-evidence";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not open private evidence."); }
+    finally { setOpeningEvidenceId(""); }
+  };
+  const openPayment = async (notification: JsonRecord) => {
+    if (!notification.payment_id) return;
+    if (!notification.read_at) await markRead(notification.id);
+    navigate(`/owner/money?tab=approvals&payment_id=${encodeURIComponent(notification.payment_id)}`);
+  };
+  const paymentStatus = (status?: string) => {
+    if (status === "pending_owner_approval" || status === "approval_processing") return "Pending Owner Approval";
+    if (status === "paid") return "Approved";
+    if (status === "rejected") return "Rejected";
+    return status?.replaceAll("_", " ") || "Status unavailable";
+  };
   return <Page title="Alerts" subtitle={`${notifications.filter((item) => !item.read_at).length} unread`}>
     <ErrorBox error={error} />
+    {selectedReport && <Card className="stack">
+      <div className="spread"><h2>{selectedReport.report.previous_hostel || "Previous hostel report"}</h2><Button kind="ghost" onClick={() => setSelectedReport(null)}>Close</Button></div>
+      <b>{selectedReport.report.title || selectedReport.report.category || "Tenant report"}</b>
+      {selectedReport.report.status && <span className="badge">{selectedReport.report.status.replaceAll("_", " ")}</span>}
+      {selectedReport.report.created_at && <p className="muted small">Reported {new Date(selectedReport.report.created_at).toLocaleDateString()}</p>}
+      {selectedReport.report.amount_claimed != null && <p>Claimed: ₹{selectedReport.report.amount_claimed} · Outstanding: ₹{selectedReport.report.outstanding_balance ?? selectedReport.report.amount_claimed}</p>}
+      {selectedReport.report.description && <p>{selectedReport.report.description}</p>}
+      {selectedReport.report.tenant_response?.text && <p className="muted">Tenant response: {selectedReport.report.tenant_response.text}</p>}
+      {(selectedReport.report.evidence_documents || []).map((evidence: JsonRecord) =>
+        <Button key={evidence.id} kind="secondary" onClick={() => void openEvidence(evidence)} disabled={!!openingEvidenceId}>
+          {openingEvidenceId === evidence.id ? "Opening evidence…" : `Download private evidence: ${evidence.filename || "document"}`}
+        </Button>,
+      )}
+    </Card>}
     <Card className="stack">{notifications.map((item) => <article className="spread" key={item.id}>
-      <div><b>{item.message || item.event || "Hostel notification"}</b><p className="muted small">{item.created_at ? new Date(item.created_at).toLocaleString() : ""} {item.amount != null ? `· ₹${item.amount}` : ""}</p>{item.status && <span className="badge">{item.status}</span>}</div>
-      {!item.read_at && <Button kind="secondary" onClick={() => void markRead(item.id)}>Mark read</Button>}
+      <div className="stack">
+        <b>{item.event?.replaceAll("_", " ") || item.message || "Hostel notification"}</b>
+        <p className="muted small">{item.created_at ? new Date(item.created_at).toLocaleString() : ""}</p>
+        {item.payment_id ? <>
+          <p>{item.tenant_name || "Tenant"} · Room {item.room_number || "—"}</p>
+          <p>Amount: ₹{item.amount ?? 0} · Method: {item.method?.replaceAll("_", " ") || "—"}</p>
+          <p>UTR / Transaction reference: {item.upi_reference || "—"}</p>
+          <p>Submitted: {item.payment_submitted_at ? new Date(item.payment_submitted_at).toLocaleString() : item.created_at ? new Date(item.created_at).toLocaleString() : "Date unavailable"}</p>
+          <span className={`badge ${item.status === "rejected" ? "error" : item.status === "paid" ? "success" : item.status === "pending_owner_approval" || item.status === "approval_processing" ? "warning" : ""}`}>{paymentStatus(item.status)}</span>
+          {item.rejection_reason && <p>Rejection reason: {item.rejection_reason}</p>}
+          {item.message && <p>{item.message}</p>}
+        </> : <>
+          {item.message && item.event && <p>{item.message}</p>}
+          {item.status && <span className="badge">{item.status}</span>}
+        </>}
+        {!item.read_at && <Button kind="secondary" onClick={() => void markRead(item.id)}>Mark read</Button>}
+        {item.payment_id && <Button kind="secondary" onClick={() => void openPayment(item)}>View Payment</Button>}
+        {!item.payment_id && item.report_id && <Button kind="secondary" onClick={() => void openReport(item)} disabled={!!openingReportId}>
+          {openingReportId === item.id ? "Opening report…" : "View report details"}
+        </Button>}
+      </div>
     </article>)}{!notifications.length && <p>No notifications.</p>}</Card>
   </Page>;
 }
@@ -237,11 +411,32 @@ export function OwnerReferralsPage() {
     try { await navigator.clipboard.writeText(value); }
     catch { setError("Clipboard access is unavailable in this browser."); }
   };
+  const share = async () => {
+    if (!data) return;
+    if (!navigator.share) { setError("Sharing is unavailable in this browser; use Copy code, Copy link, or WhatsApp."); return; }
+    try {
+      await navigator.share({
+        title: "Hostel360 referral",
+        text: `Join Hostel360 with my referral code ${data.referral_code}: ${data.referral_link}`,
+        url: data.referral_link,
+      });
+    } catch (reason) {
+      if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message || "Could not open the share menu.");
+    }
+  };
+  const shareWhatsApp = () => {
+    if (!data) return;
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(`Join Hostel360 with my referral code ${data.referral_code}: ${data.referral_link}`)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
   return <Page title="Refer & Earn" subtitle="Subscription coins, not cash">
     <ErrorBox error={error} />
     {!data ? <Button kind="secondary" onClick={() => void load()}>Retry</Button> : <>
       <Card className="stack"><span className="muted">Your referral code</span><div className="stat">{data.referral_code}</div><p>{data.referral_link}</p>
-        <div className="row"><Button kind="secondary" onClick={() => void copy(data.referral_code)}>Copy code</Button><Button kind="secondary" onClick={() => void copy(data.referral_link)}>Copy link</Button><Button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`Join Hostel360 with my referral code ${data.referral_code}: ${data.referral_link}`)}`, "_blank", "noopener,noreferrer")}>WhatsApp</Button></div>
+        <div className="row"><Button kind="secondary" onClick={() => void copy(data.referral_code)}>Copy code</Button><Button kind="secondary" onClick={() => void copy(data.referral_link)}>Copy link</Button><Button onClick={() => void share()}>Share</Button><Button kind="secondary" onClick={shareWhatsApp}>WhatsApp</Button></div>
       </Card>
       {!data.enabled && <AlertMessage tone="info">The referral promotion is currently paused. Rewards and redemption are unavailable while disabled.</AlertMessage>}
       <div className="grid"><Card><span className="muted">Referrals</span><div className="stat">{data.total_referrals}</div></Card><Card><span className="muted">Successful</span><div className="stat">{data.successful_referrals}</div></Card></div>
@@ -254,7 +449,8 @@ export function OwnerReferralsPage() {
 }
 
 export function OwnerMorePage() {
-  const { activeId, refresh } = useOwnerHostel();
+  const { activeId, activeHostel, refresh } = useOwnerHostel();
+  const { user } = useAuth();
   const [reports, setReports] = useState<JsonRecord | null>(null);
   const [hostel, setHostel] = useState<JsonRecord | null>(null);
   const [subscription, setSubscription] = useState<JsonRecord | null>(null);
@@ -356,6 +552,66 @@ export function OwnerMorePage() {
     finally { setBusy(""); }
   };
   const money = (paise: number) => `₹${(paise / 100).toFixed(2)}`;
+  const printInvoice = (item: JsonRecord) => {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) { setError("The browser blocked the invoice window. Allow pop-ups and retry."); return; }
+    const amount = Number(item.amount ?? 0);
+    const grossAmount = item.gross_amount_paise != null
+      ? Number(item.gross_amount_paise) / 100
+      : Number(item.total_amount ?? amount);
+    const discount = Number(item.coin_discount_paise ?? 0) / 100;
+    const safeMoney = (value: number) => Number.isFinite(value) ? value.toFixed(2) : "0.00";
+    const method = String(item.method || "online").toUpperCase();
+    const hostelName = subscription?.hostel_name || activeHostel?.name || "";
+    const discountRow = discount > 0
+      ? `<tr><td><b>Referral subscription coin discount</b><br><span class="muted">${escapeInvoiceHtml(item.referral_coins || 0)} subscription coins applied</span></td><td></td><td class="amount">−₹${escapeInvoiceHtml(safeMoney(discount))}</td></tr>`
+      : "";
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Subscription invoice</title><style>
+        body{font-family:Arial,sans-serif;color:#1a1d1a;padding:32px;background:#fff}
+        .row{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+        .brand{font-size:22px;font-weight:800;color:#2c5e3e}
+        .title{font-size:22px;font-weight:800}.accent{color:#d97706}
+        .muted{color:#6a706a;font-size:13px}
+        .box{background:#f4f5f4;border-radius:12px;padding:16px;margin-top:24px}
+        table{width:100%;border-collapse:collapse;margin-top:24px}
+        th{text-align:left;font-size:12px;color:#6a706a;border-bottom:2px solid #e5e7e5;padding:10px 8px;text-transform:uppercase}
+        td{padding:14px 8px;border-bottom:1px solid #e5e7e5;font-size:14px}
+        .amount{text-align:right;font-weight:700}
+        .total{display:flex;justify-content:flex-end;margin-top:20px}
+        .total strong{font-size:26px;color:#2c5e3e}
+        .badge{display:inline-block;background:#e3ece5;color:#1d402a;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;margin-top:6px}
+        .footer{margin-top:40px;border-top:1px solid #e5e7e5;padding-top:16px;font-size:12px;color:#6a706a}
+        @media print{body{padding:16px}}
+      </style></head><body>
+        <div class="row"><div><div class="brand">Hostel <span class="accent">360</span></div><div class="muted">Subscription Invoice</div></div>
+          <div style="text-align:right"><b>${escapeInvoiceHtml(item.invoice_no || "INV-—")}</b><div class="muted">Date: ${escapeInvoiceHtml(invoiceDate(item.created_at))}</div><span class="badge">PAID · ${escapeInvoiceHtml(method)}</span></div>
+        </div>
+        <section class="box"><div class="muted">Billed to</div><b>${escapeInvoiceHtml(user?.name || "")}</b><div class="muted">${escapeInvoiceHtml(hostelName)}</div></section>
+        <table><thead><tr><th>Description</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead><tbody>
+          <tr><td><b>${escapeInvoiceHtml(item.plan_name || "Plan")}</b><br><span class="muted">${escapeInvoiceHtml(item.months || 1)} month(s) premium subscription, including applicable taxes</span></td>
+            <td>${escapeInvoiceHtml(invoiceDate(item.start))}<br><span class="muted">to ${escapeInvoiceHtml(invoiceDate(item.end))}</span></td>
+            <td class="amount">₹${escapeInvoiceHtml(safeMoney(grossAmount))}</td></tr>
+          ${discountRow}
+        </tbody></table>
+        <div class="total"><div style="text-align:right"><div class="muted">Total Paid</div><strong>₹${escapeInvoiceHtml(safeMoney(amount))}</strong></div></div>
+        <footer class="footer">Thank you for choosing Hostel 360. This is a computer-generated invoice and does not require a signature.<br>For support, contact your Hostel 360 administrator.</footer>
+      </body></html>`;
+    try {
+      printWindow.opener = null;
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      window.setTimeout(() => {
+        try { printWindow.print(); }
+        catch { setError("Could not open the print dialog for this invoice."); }
+      }, 500);
+    } catch {
+      printWindow.close();
+      setError("Could not generate the invoice.");
+    }
+  };
   const stats = reports || {};
   return <Page title="More" subtitle="Hostel tools, service requests and subscription">
     <ErrorBox error={error} />
@@ -372,7 +628,7 @@ export function OwnerMorePage() {
     {section === "subscription" && <div className="stack">
       <Card className="stack"><h2>Current subscription</h2><p>{subscription?.subscription?.status || subscription?.status || "Free plan"}</p><p>{subscription?.subscription?.expires_at ? `Expires ${new Date(subscription.subscription.expires_at).toLocaleDateString()}` : ""}</p><p>Payments enabled: {subscription?.payments_enabled ? "Yes" : "No"}</p></Card>
       {subscription?.plans?.map((plan: JsonRecord) => <Card className="spread" key={plan.id}><div><b>{plan.name}</b><p>{plan.duration_months} months · Base {money(plan.base_price_paise || 0)} · GST {plan.gst_rates?.join("% + ") || "not configured"}%</p><b>Total {money(plan.total_amount_paise || 0)}</b></div><Button onClick={() => void startCheckout(plan)} disabled={!subscription?.payments_enabled}>Choose plan</Button></Card>)}
-      {(subscription?.history || []).length > 0 && <Card className="stack"><h2>Subscription history & invoices</h2>{(subscription?.history || []).map((item: JsonRecord) => <div className="spread" key={item.id}><span>{item.plan_name || item.plan_id} · ₹{item.amount} · {item.status}</span><Button kind="secondary" onClick={() => window.print()}>Print invoice</Button></div>)}</Card>}
+      {(subscription?.history || []).length > 0 && <Card className="stack"><h2>Subscription history & invoices</h2>{(subscription?.history || []).map((item: JsonRecord) => <div className="spread" key={item.id}><span>{item.plan_name || item.plan_id} · {item.invoice_no || "—"} · ₹{item.amount} · {item.status}</span><Button kind="secondary" onClick={() => printInvoice(item)}>Download Invoice</Button></div>)}</Card>}
     </div>}
     {checkout && <div className="modal-backdrop"><section className="modal"><div className="spread"><h2>Review subscription payment</h2><Button kind="ghost" onClick={() => setCheckout(null)}>Close</Button></div>
       <Card className="stack"><b>{checkout.name}</b><p>Total {quote ? money(quote.total_amount_paise || quote.total_paise || 0) : "Quote loading…"}</p><p>GST: {quote?.gst_amount_paise != null ? money(quote.gst_amount_paise) : "Calculated by the server"}</p><p>Referral coin discount: {quote ? money(quote.discount_paise || 0) : "—"}</p></Card>
