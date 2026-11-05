@@ -117,7 +117,7 @@ function AuthScaffold({ children, title }: { children: React.ReactNode; title: s
 }
 
 export function LoginPage() {
-  const { login, loginWithGoogleToken, error: sessionError, refresh } = useAuth();
+  const { login, loginWithGoogleToken, linkPendingGoogleAccount, googleLinkPending, error: sessionError, refresh } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const propertyId = new URLSearchParams(location.search).get("propertyId");
@@ -137,7 +137,16 @@ export function LoginPage() {
     }
     setBusy(true);
     setError("");
-    try { next(await login(email.trim(), password)); }
+    try {
+      const user = await login(email.trim(), password);
+      if (googleLinkPending && !user.must_change_password) {
+        try { await linkPendingGoogleAccount(); }
+        catch (reason) {
+          window.alert(`Signed in, but Google could not be linked: ${reason instanceof Error ? reason.message : "Please try again later."}`);
+        }
+      }
+      next(user);
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Login failed."); }
     finally { setBusy(false); }
   };
@@ -147,6 +156,7 @@ export function LoginPage() {
         {sessionError && <><AlertMessage tone="error">Could not restore your previous session: {sessionError}</AlertMessage><Button kind="secondary" onClick={() => void refresh()}>Retry session</Button></>}
         <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="you@example.com" required />
         <Field label="Password" value={password} onChange={setPassword} type="password" required />
+        {googleLinkPending && <AlertMessage tone="info">Sign in with the password for the account you want to link to this Google account.</AlertMessage>}
         {error && <AlertMessage tone="error">{error}</AlertMessage>}
         <Button type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign In"}</Button>
       </form>
@@ -216,7 +226,7 @@ export function RegisterPage() {
 }
 
 export function ChangePasswordPage() {
-  const { changePassword, logout } = useAuth();
+  const { changePassword, linkPendingGoogleAccount, googleLinkPending, logout } = useAuth();
   const navigate = useNavigate();
   const [current, setCurrent] = useState("");
   const [nextPassword, setNextPassword] = useState("");
@@ -237,6 +247,12 @@ export function ChangePasswordPage() {
     setError("");
     try {
       const user = await changePassword(current, nextPassword);
+      if (googleLinkPending) {
+        try { await linkPendingGoogleAccount(); }
+        catch (reason) {
+          window.alert(`Password updated, but Google could not be linked: ${reason instanceof Error ? reason.message : "Please try again later."}`);
+        }
+      }
       navigate(user.role === "owner" ? "/owner" : user.role === "admin" ? "/admin" : "/tenant", { replace: true });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update password."); }
     finally { setBusy(false); }

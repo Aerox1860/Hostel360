@@ -19,6 +19,8 @@ type AuthState = {
   login: (email: string, password: string) => Promise<User>;
   register: (body: Record<string, unknown>) => Promise<User>;
   loginWithGoogleToken: (idToken: string, propertyId?: string) => Promise<User>;
+  linkPendingGoogleAccount: () => Promise<void>;
+  googleLinkPending: boolean;
   changePassword: (currentPassword: string, newPassword: string) => Promise<User>;
   logout: () => void;
 };
@@ -29,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [pendingGoogleToken, setPendingGoogleToken] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -69,14 +72,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loginWithGoogleToken = useCallback(async (idToken: string, propertyId?: string) => {
-    const result = await api.post<{ access_token: string; user: User }>("/auth/google", {
-      id_token: idToken,
-      ...(propertyId ? { property_id: propertyId } : {}),
-    });
-    tokenStore.set(result.access_token);
-    setUser(result.user);
-    return result.user;
+    try {
+      const result = await api.post<{ access_token: string; user: User }>("/auth/google", {
+        id_token: idToken,
+        ...(propertyId ? { property_id: propertyId } : {}),
+      });
+      tokenStore.set(result.access_token);
+      setUser(result.user);
+      setPendingGoogleToken(null);
+      return result.user;
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.code === "google_link_required") setPendingGoogleToken(idToken);
+      throw reason;
+    }
   }, []);
+
+  const linkPendingGoogleAccount = useCallback(async () => {
+    if (!pendingGoogleToken) return;
+    try { await api.post("/auth/google/link", { id_token: pendingGoogleToken }); }
+    finally { setPendingGoogleToken(null); }
+  }, [pendingGoogleToken]);
 
   const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
     const result = await api.post<{ user: User }>("/auth/password/change", {
@@ -90,12 +105,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     tokenStore.set(null);
     setUser(null);
+    setPendingGoogleToken(null);
     setError("");
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, error, refresh, login, register, loginWithGoogleToken, changePassword, logout }),
-    [user, loading, error, refresh, login, register, loginWithGoogleToken, changePassword, logout],
+    () => ({
+      user, loading, error, refresh, login, register, loginWithGoogleToken, linkPendingGoogleAccount,
+      googleLinkPending: Boolean(pendingGoogleToken), changePassword, logout,
+    }),
+    [user, loading, error, refresh, login, register, loginWithGoogleToken, linkPendingGoogleAccount, pendingGoogleToken, changePassword, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
