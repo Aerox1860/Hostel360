@@ -20,6 +20,7 @@ def configure_production(monkeypatch):
     monkeypatch.setattr(server, "ADMIN_PASSWORD", "strong-password-123")
     monkeypatch.setattr(server, "TENANT_DOCUMENT_ENCRYPTION_KEY", server.Fernet.generate_key().decode("ascii"))
     monkeypatch.setattr(server, "TENANT_AADHAAR_HMAC_KEY", "b" * 32)
+    monkeypatch.setattr(server, "PUBLIC_REGISTRATION_BASE_URL", "https://apply.example.com")
     monkeypatch.setattr(server, "CORS_ALLOWED_ORIGINS", ["https://app.example.com"])
 
 
@@ -67,6 +68,34 @@ def test_production_config_rejects_wildcard_cors(monkeypatch):
 
     with pytest.raises(RuntimeError, match="CORS_ALLOWED_ORIGINS"):
         server._validate_production_config()
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "",
+        "http://apply.example.com",
+        "https://user:password@apply.example.com",
+        "https://apply.example.com/path",
+        "https://apply.example.com?token=bad",
+        "https://apply.example.com#fragment",
+        "https://apply.example.com:invalid",
+        "https://apply.example.com:99999",
+    ],
+)
+def test_production_config_rejects_invalid_public_registration_base_url(monkeypatch, base_url):
+    configure_production(monkeypatch)
+    monkeypatch.setattr(server, "PUBLIC_REGISTRATION_BASE_URL", base_url)
+
+    with pytest.raises(RuntimeError, match="PUBLIC_REGISTRATION_BASE_URL"):
+        server._validate_production_config()
+
+
+def test_nonproduction_config_does_not_require_public_registration_base_url(monkeypatch):
+    monkeypatch.setattr(server, "APP_ENV", "test")
+    monkeypatch.setattr(server, "PUBLIC_REGISTRATION_BASE_URL", "")
+
+    server._validate_production_config()
 
 
 def test_production_config_accepts_explicit_secure_settings(monkeypatch):

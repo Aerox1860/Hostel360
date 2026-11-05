@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone, time
 from typing import List, Optional, Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from io import BytesIO
 
@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field, EmailStr, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, Field, EmailStr, PrivateAttr, StrictBool, field_validator, model_validator
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from cryptography.fernet import Fernet, InvalidToken
 from google.auth import exceptions as google_auth_exceptions
@@ -69,6 +69,10 @@ TENANT_DOCUMENT_DIR = ROOT_DIR / "uploads" / "tenant-documents"
 TENANT_DOCUMENT_MAX_SIZE = 10 * 1024 * 1024
 TENANT_DOCUMENT_ENCRYPTION_KEY = os.environ.get("TENANT_DOCUMENT_ENCRYPTION_KEY", "")
 TENANT_AADHAAR_HMAC_KEY = os.environ.get("TENANT_AADHAAR_HMAC_KEY", "")
+PUBLIC_REGISTRATION_BASE_URL = os.environ.get("PUBLIC_REGISTRATION_BASE_URL", "").strip().rstrip("/")
+TENANT_APPLICATION_RATE_WINDOW = timedelta(minutes=15)
+TENANT_APPLICATION_RATE_LIMIT = 10
+TENANT_APPLICATION_ALLOCATION_LOCK = timedelta(minutes=5)
 TENANT_REPORT_EVIDENCE_DIR = ROOT_DIR / "uploads" / "tenant-report-evidence"
 TENANT_REPORT_EVIDENCE_MAX_SIZE = 10 * 1024 * 1024
 TENANT_RENT_EVIDENCE_DIR = ROOT_DIR / "uploads" / "tenant-rent-evidence"
@@ -137,11 +141,36 @@ app = FastAPI(title="Hostel 360 API")
 api = APIRouter(prefix="/api")
 
 
+def _is_valid_registration_base_url(base_url: str, require_https: bool = False) -> bool:
+    try:
+        base = urlsplit(base_url)
+        valid_scheme = base.scheme == "https" if require_https else base.scheme in {"http", "https"}
+        return valid_scheme and bool(base.netloc and base.hostname) and (
+            base.username is None
+            and base.password is None
+            and not re.search(r"\s", base.netloc)
+            and not base.netloc.endswith(":")
+            and base.path in {"", "/"}
+            and not base.query
+            and not base.fragment
+            and (base.port is None or 0 < base.port <= 65535)
+        )
+    except ValueError:
+        return False
+
+
 def _validate_production_config():
     if APP_ENV not in {"development", "test", "staging", "production"}:
         raise RuntimeError("APP_ENV must be development, test, staging, or production.")
     if APP_ENV != "production":
         return
+    if not PUBLIC_REGISTRATION_BASE_URL or not _is_valid_registration_base_url(
+        PUBLIC_REGISTRATION_BASE_URL,
+        require_https=True,
+    ):
+        raise RuntimeError(
+            "Production requires PUBLIC_REGISTRATION_BASE_URL to be a valid HTTPS origin without a path, query, fragment, or credentials."
+        )
     if (
         JWT_SECRET == "hostel360-dev-secret"
         or len(JWT_SECRET.encode("utf-8")) < 32
@@ -1431,6 +1460,8 @@ async def _ensure_tenant_aadhaar_claim_index():
 
 
 class TenantBody(BaseModel):
+    _registration_application_id: Optional[str] = PrivateAttr(default=None)
+
     hostel_id: Optional[str] = None
     name: str
     mobile: str
@@ -1522,6 +1553,80 @@ class TenantAadhaarCheckBody(BaseModel):
         if not re.fullmatch(r"\d{12}", digits):
             raise ValueError("Enter a valid 12-digit Aadhaar number")
         return digits
+
+
+class PublicTenantApplicationBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    mobile: str = Field(min_length=10, max_length=20)
+    email: Optional[EmailStr] = None
+    address: str = Field(min_length=1, max_length=500)
+    joining_date: str
+    preferences: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name", "address")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("This field is required")
+        return value
+
+    @field_validator("mobile")
+    @classmethod
+    def normalize_mobile(cls, value: str) -> str:
+        value = value.strip()
+        if not re.fullmatch(r"\+?[\d\s()-]+", value):
+            raise ValueError("Enter a valid 10-digit mobile number")
+        digits = re.sub(r"\D", "", value)
+        if len(digits) != 10:
+            raise ValueError("Enter a valid 10-digit mobile number")
+        return digits
+
+    @field_validator("joining_date")
+    @classmethod
+    def normalize_joining_date(cls, value: str) -> str:
+        try:
+            return date.fromisoformat(value).isoformat()
+        except (TypeError, ValueError):
+            raise ValueError("Enter a valid joining date in YYYY-MM-DD format")
+
+    @field_validator("preferences")
+    @classmethod
+    def normalize_preferences(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() or None if value is not None else None
+
+
+class TenantApplicationReviewBody(BaseModel):
+    status: Literal["approved", "rejected"]
+
+
+class TenantApplicationAllocationBody(BaseModel):
+    room_id: str = Field(min_length=1, max_length=64)
+    bed_number: str = Field(min_length=1, max_length=32)
+    aadhaar_number: Optional[str] = None
+    documents: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("aadhaar_number")
+    @classmethod
+    def validate_aadhaar_number(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        digits = re.sub(r"[\s-]", "", value)
+        if not re.fullmatch(r"\d{12}", digits):
+            raise ValueError("Enter a valid 12-digit Aadhaar number")
+        return digits
+
+    @field_validator("documents")
+    @classmethod
+    def validate_document_refs(cls, value: dict[str, str]) -> dict[str, str]:
+        allowed = {"aadhaar_front", "aadhaar_back", "selfie"}
+        if any(kind not in allowed for kind in value):
+            raise ValueError("Unsupported tenant document type")
+        if any(not re.fullmatch(r"[0-9a-f]{32}", upload_id) for upload_id in value.values()):
+            raise ValueError("Invalid tenant document reference")
+        if len(set(value.values())) != len(value):
+            raise ValueError("Each tenant document must be uploaded separately")
+        return value
 
 
 class TenantHistoryConsentBody(BaseModel):
@@ -2350,6 +2455,22 @@ async def owner_add_tenant(body: TenantBody, user: dict = Depends(require_roles(
     h = await get_owner_hostel(user, body.hostel_id)
     if not h:
         raise HTTPException(400, "Create your hostel first")
+    registration_application_id = body._registration_application_id
+    if registration_application_id:
+        existing_application_tenant = await db.tenants.find_one(
+            {
+                "tenant_application_id": registration_application_id,
+                "hostel_id": h["id"],
+            },
+            {"_id": 0},
+        )
+        if existing_application_tenant:
+            safe_tenant = {
+                key: value
+                for key, value in existing_application_tenant.items()
+                if key not in {"documents", "aadhaar_number", "aadhaar", "tenant_application_id"}
+            }
+            return {"tenant": clean(safe_tenant)}
     aadhaar_hash = _tenant_aadhaar_hash(body.aadhaar_number) if body.aadhaar_number else None
     if aadhaar_hash:
         await _aadhaar_duplicate_error(aadhaar_hash)
@@ -2534,6 +2655,8 @@ async def owner_add_tenant(body: TenantBody, user: dict = Depends(require_roles(
             "active": True,
             "created_at": now_utc().isoformat(),
         }
+        if registration_application_id:
+            tenant["tenant_application_id"] = registration_application_id
         await db.tenants.insert_one(tenant)
         tenant_inserted = True
         if user_id:
@@ -2556,7 +2679,7 @@ async def owner_add_tenant(body: TenantBody, user: dict = Depends(require_roles(
                 raise HTTPException(503, "Aadhaar registration could not be finalized. Please retry.")
         safe_tenant = {
             key: value for key, value in tenant.items()
-            if key not in {"documents", "aadhaar_number", "aadhaar"}
+            if key not in {"documents", "aadhaar_number", "aadhaar", "tenant_application_id"}
         }
         return {"tenant": clean(safe_tenant)}
     except Exception:
@@ -2596,6 +2719,454 @@ async def owner_add_tenant(body: TenantBody, user: dict = Depends(require_roles(
                     "membership_registration_lock_at": "",
                 }},
             )
+
+
+def _tenant_registration_url(token: str) -> str:
+    if not PUBLIC_REGISTRATION_BASE_URL:
+        raise HTTPException(
+            503,
+            "Tenant registration URL is not configured. Set PUBLIC_REGISTRATION_BASE_URL.",
+        )
+    if not _is_valid_registration_base_url(PUBLIC_REGISTRATION_BASE_URL):
+        raise HTTPException(
+            503,
+            "PUBLIC_REGISTRATION_BASE_URL must be an absolute HTTP(S) origin without a path, query, or fragment.",
+        )
+    return f"{PUBLIC_REGISTRATION_BASE_URL}/apply?token={quote(token, safe='')}"
+
+
+def _tenant_registration_qr_data_uri(registration_url: str) -> str:
+    import qrcode
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=4,
+    )
+    qr.add_data(registration_url)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="black", back_color="white")
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return f"data:image/png;base64,{base64.b64encode(output.getvalue()).decode('ascii')}"
+
+
+def _tenant_registration_qr_response(token_document: dict) -> dict:
+    registration_url = _tenant_registration_url(token_document["token"])
+    return {
+        "id": token_document["id"],
+        "hostel_id": token_document["hostel_id"],
+        "registration_url": registration_url,
+        "qr_data_uri": _tenant_registration_qr_data_uri(registration_url),
+        "expires_at": None,
+        "permanent": True,
+    }
+
+
+async def _active_tenant_registration_token(owner_id: str, hostel_id: str) -> Optional[dict]:
+    return await db.tenant_registration_tokens.find_one(
+        {"hostel_id": hostel_id, "owner_id": owner_id, "active": True},
+        {"_id": 0},
+    )
+
+
+async def _valid_tenant_registration_token(token: str) -> tuple[dict, dict]:
+    token_document = await db.tenant_registration_tokens.find_one(
+        {"token": token, "active": True},
+        {"_id": 0},
+    )
+    if not token_document:
+        raise HTTPException(404, "Registration link is invalid or has been revoked")
+    hostel = await db.hostels.find_one(
+        {"id": token_document["hostel_id"], "owner_id": token_document["owner_id"]},
+        {"_id": 0, "id": 1, "name": 1, "city": 1, "area": 1},
+    )
+    if not hostel:
+        raise HTTPException(410, "Registration link is no longer available")
+    return token_document, hostel
+
+
+def _tenant_application_response(application: dict) -> dict:
+    return {
+        key: value
+        for key, value in application.items()
+        if key not in {
+            "owner_id",
+            "duplicate_key",
+            "registration_token_id",
+            "allocation_lock_id",
+            "allocation_lock_expires_at",
+        }
+    }
+
+
+def _safe_owner_tenant_summary(tenant: dict) -> dict:
+    return clean({
+        key: value
+        for key, value in tenant.items()
+        if key not in {"documents", "aadhaar_number", "aadhaar", "tenant_application_id"}
+    })
+
+
+def _tenant_application_duplicate_key(hostel_id: str, mobile: str) -> str:
+    return hashlib.sha256(f"{hostel_id}:{mobile}".encode("utf-8")).hexdigest()
+
+
+async def _check_tenant_application_rate_limit(request: Request, token_document: dict):
+    now = now_utc()
+    window_seconds = int(TENANT_APPLICATION_RATE_WINDOW.total_seconds())
+    window_start = int(now.timestamp()) // window_seconds * window_seconds
+    client_ip = request.client.host if request.client else "unknown"
+    ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()
+    bucket_id = hashlib.sha256(
+        f"{token_document['id']}:{ip_hash}:{window_start}".encode("utf-8")
+    ).hexdigest()
+    expires_at = datetime.fromtimestamp(
+        window_start + window_seconds * 2,
+        tz=timezone.utc,
+    )
+    try:
+        await db.tenant_application_rate_limits.update_one(
+            {"id": bucket_id},
+            {
+                "$inc": {"count": 1},
+                "$setOnInsert": {"expires_at": expires_at},
+            },
+            upsert=True,
+        )
+    except DuplicateKeyError:
+        await db.tenant_application_rate_limits.update_one(
+            {"id": bucket_id},
+            {"$inc": {"count": 1}},
+        )
+    bucket = await db.tenant_application_rate_limits.find_one({"id": bucket_id}, {"_id": 0})
+    if not bucket or bucket.get("count", 0) > TENANT_APPLICATION_RATE_LIMIT:
+        raise HTTPException(429, "Too many applications were submitted. Please try again later.")
+
+
+@api.get("/public/tenant-registration")
+async def public_tenant_registration(token: str):
+    _, hostel = await _valid_tenant_registration_token(token)
+    return {"hostel": hostel}
+
+
+@api.post("/public/tenant-applications")
+async def public_submit_tenant_application(
+    body: PublicTenantApplicationBody,
+    request: Request,
+    token: str,
+):
+    token_document, hostel = await _valid_tenant_registration_token(token)
+    await _check_tenant_application_rate_limit(request, token_document)
+    duplicate_key = _tenant_application_duplicate_key(hostel["id"], body.mobile)
+    existing = await db.tenant_applications.find_one(
+        {"duplicate_key": duplicate_key},
+        {"_id": 0, "id": 1},
+    )
+    if existing:
+        raise HTTPException(409, "An application for this mobile number is already active.")
+
+    application = {
+        "id": new_id(),
+        "owner_id": token_document["owner_id"],
+        "hostel_id": hostel["id"],
+        "registration_token_id": token_document["id"],
+        "name": body.name,
+        "mobile": body.mobile,
+        "email": str(body.email).lower() if body.email else None,
+        "address": body.address,
+        "joining_date": body.joining_date,
+        "preferences": body.preferences,
+        "status": "pending",
+        "duplicate_key": duplicate_key,
+        "created_at": now_utc().isoformat(),
+    }
+    try:
+        await db.tenant_applications.insert_one(application)
+    except DuplicateKeyError as error:
+        raise HTTPException(
+            409,
+            "An application for this mobile number is already active.",
+        ) from error
+    return {"application": _tenant_application_response(application)}
+
+
+@api.get("/owner/tenant-registration-qr")
+async def owner_get_tenant_registration_qr(
+    hostel_id: str,
+    user: dict = Depends(require_roles("owner")),
+):
+    hostel = await get_owner_hostel(user, hostel_id)
+    if not hostel:
+        raise HTTPException(404, "Hostel not found")
+    token_document = await _active_tenant_registration_token(user["id"], hostel["id"])
+    if not token_document:
+        return {"registration": None}
+    return {"registration": _tenant_registration_qr_response(token_document)}
+
+
+@api.post("/owner/tenant-registration-qr")
+async def owner_create_tenant_registration_qr(
+    hostel_id: str,
+    user: dict = Depends(require_roles("owner")),
+):
+    hostel = await get_owner_hostel(user, hostel_id)
+    if not hostel:
+        raise HTTPException(404, "Hostel not found")
+    _tenant_registration_url("configuration-check")
+    existing = await _active_tenant_registration_token(user["id"], hostel["id"])
+    if existing:
+        return {"registration": _tenant_registration_qr_response(existing)}
+
+    token_document = {
+        "id": new_id(),
+        "token": secrets.token_urlsafe(32),
+        "owner_id": user["id"],
+        "hostel_id": hostel["id"],
+        "active": True,
+        "created_at": now_utc().isoformat(),
+        "expires_at": None,
+    }
+    try:
+        await db.tenant_registration_tokens.insert_one(token_document)
+    except DuplicateKeyError as error:
+        existing = await _active_tenant_registration_token(user["id"], hostel["id"])
+        if existing:
+            return {"registration": _tenant_registration_qr_response(existing)}
+        raise HTTPException(
+            409,
+            "A registration QR was generated concurrently. Refresh and try again.",
+        ) from error
+    return {"registration": _tenant_registration_qr_response(token_document)}
+
+
+@api.delete("/owner/tenant-registration-qr")
+async def owner_revoke_tenant_registration_qr(
+    hostel_id: str,
+    user: dict = Depends(require_roles("owner")),
+):
+    hostel = await get_owner_hostel(user, hostel_id)
+    if not hostel:
+        raise HTTPException(404, "Hostel not found")
+    result = await db.tenant_registration_tokens.update_many(
+        {"hostel_id": hostel["id"], "owner_id": user["id"], "active": True},
+        {"$set": {"active": False, "revoked_at": now_utc().isoformat()}},
+    )
+    return {"revoked": result.modified_count > 0}
+
+
+@api.get("/owner/tenant-applications")
+async def owner_tenant_applications(
+    hostel_id: str,
+    user: dict = Depends(require_roles("owner")),
+):
+    hostel = await get_owner_hostel(user, hostel_id)
+    if not hostel:
+        raise HTTPException(404, "Hostel not found")
+    applications = await db.tenant_applications.find(
+        {"owner_id": user["id"], "hostel_id": hostel["id"]},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
+    return {"applications": [_tenant_application_response(item) for item in applications]}
+
+
+@api.put("/owner/tenant-applications/{application_id}")
+async def owner_update_tenant_application(
+    application_id: str,
+    body: TenantApplicationReviewBody,
+    user: dict = Depends(require_roles("owner")),
+):
+    application = await db.tenant_applications.find_one(
+        {"id": application_id, "owner_id": user["id"]},
+        {"_id": 0},
+    )
+    if not application or not await hostel_owned(user, application["hostel_id"]):
+        raise HTTPException(404, "Tenant application not found")
+    if application["status"] == body.status:
+        return {"application": _tenant_application_response(application)}
+    if application["status"] != "pending":
+        raise HTTPException(409, "Only pending applications can be reviewed.")
+
+    update = {"$set": {"status": body.status, "reviewed_at": now_utc().isoformat()}}
+    if body.status == "rejected":
+        update["$unset"] = {"duplicate_key": ""}
+    changed = await db.tenant_applications.update_one(
+        {
+            "id": application_id,
+            "owner_id": user["id"],
+            "hostel_id": application["hostel_id"],
+            "status": "pending",
+        },
+        update,
+    )
+    updated = await db.tenant_applications.find_one(
+        {"id": application_id, "owner_id": user["id"], "hostel_id": application["hostel_id"]},
+        {"_id": 0},
+    )
+    if changed.modified_count != 1 and (not updated or updated["status"] != body.status):
+        raise HTTPException(409, "Application status changed. Refresh and try again.")
+    return {"application": _tenant_application_response(updated)}
+
+
+@api.post("/owner/tenant-applications/{application_id}/allocation")
+async def owner_allocate_tenant_application(
+    application_id: str,
+    body: TenantApplicationAllocationBody,
+    user: dict = Depends(require_roles("owner")),
+):
+    application = await db.tenant_applications.find_one(
+        {"id": application_id, "owner_id": user["id"]},
+        {"_id": 0},
+    )
+    if not application or not await hostel_owned(user, application["hostel_id"]):
+        raise HTTPException(404, "Tenant application not found")
+    hostel_id = application["hostel_id"]
+    if application["status"] == "allocated":
+        tenant = await db.tenants.find_one(
+            {"id": application.get("tenant_id"), "hostel_id": hostel_id},
+            {"_id": 0},
+        )
+        if tenant:
+            return {
+                "application": _tenant_application_response(application),
+                "tenant": _safe_owner_tenant_summary(tenant),
+            }
+        raise HTTPException(409, "The application is marked allocated but its tenant record is unavailable.")
+    if application["status"] not in {"approved", "allocating"}:
+        raise HTTPException(409, "Approve the application before allocating a room and bed.")
+
+    linked_tenant = await db.tenants.find_one(
+        {"tenant_application_id": application_id, "hostel_id": hostel_id},
+        {"_id": 0},
+    )
+    if linked_tenant:
+        await db.tenant_applications.update_one(
+            {"id": application_id, "owner_id": user["id"], "hostel_id": hostel_id},
+            {
+                "$set": {
+                    "status": "allocated",
+                    "tenant_id": linked_tenant["id"],
+                    "allocation_room_id": linked_tenant["room_id"],
+                    "allocation_bed_number": linked_tenant["bed_number"],
+                    "allocated_at": now_utc().isoformat(),
+                },
+                "$unset": {"allocation_lock_id": "", "allocation_lock_expires_at": ""},
+            },
+        )
+        refreshed = await db.tenant_applications.find_one({"id": application_id}, {"_id": 0})
+        return {
+            "application": _tenant_application_response(refreshed),
+            "tenant": _safe_owner_tenant_summary(linked_tenant),
+        }
+
+    lock_id = new_id()
+    now = now_utc()
+    claimed = await db.tenant_applications.update_one(
+        {
+            "id": application_id,
+            "owner_id": user["id"],
+            "hostel_id": hostel_id,
+            "status": {"$in": ["approved", "allocating"]},
+            "$or": [
+                {"status": "approved"},
+                {"allocation_lock_expires_at": {"$lt": now}},
+                {"allocation_lock_expires_at": {"$exists": False}},
+            ],
+        },
+        {
+            "$set": {
+                "status": "allocating",
+                "allocation_lock_id": lock_id,
+                "allocation_lock_expires_at": now + TENANT_APPLICATION_ALLOCATION_LOCK,
+                "allocation_room_id": body.room_id,
+                "allocation_bed_number": body.bed_number,
+            },
+        },
+    )
+    if claimed.modified_count != 1:
+        linked_tenant = await db.tenants.find_one(
+            {"tenant_application_id": application_id, "hostel_id": hostel_id},
+            {"_id": 0},
+        )
+        if linked_tenant:
+            refreshed = await db.tenant_applications.find_one({"id": application_id}, {"_id": 0})
+            return {
+                "application": _tenant_application_response(refreshed),
+                "tenant": _safe_owner_tenant_summary(linked_tenant),
+            }
+        raise HTTPException(409, "This application is already being allocated. Refresh and retry.")
+
+    try:
+        room = await db.rooms.find_one(
+            {"id": body.room_id, "hostel_id": hostel_id},
+            {"_id": 0},
+        )
+        if not room:
+            raise HTTPException(404, "Room not found")
+        if not isinstance(room.get("rent"), int) or room["rent"] < 0:
+            raise HTTPException(409, "The selected room does not have a valid rent amount.")
+
+        tenant_body = TenantBody(
+            hostel_id=hostel_id,
+            name=application["name"],
+            mobile=application["mobile"],
+            email=application.get("email"),
+            room_id=body.room_id,
+            bed_number=body.bed_number,
+            joining_date=application["joining_date"],
+            aadhaar_number=body.aadhaar_number,
+            documents=body.documents,
+            monthly_rent=room["rent"],
+            security_deposit=0,
+            advance_amount=0,
+            create_login=False,
+        )
+        tenant_body._registration_application_id = application_id
+        result = await owner_add_tenant(tenant_body, user)
+        tenant = result["tenant"]
+        finalized = await db.tenant_applications.update_one(
+            {
+                "id": application_id,
+                "owner_id": user["id"],
+                "hostel_id": hostel_id,
+                "status": "allocating",
+                "allocation_lock_id": lock_id,
+            },
+            {
+                "$set": {
+                    "status": "allocated",
+                    "tenant_id": tenant["id"],
+                    "allocated_at": now_utc().isoformat(),
+                },
+                "$unset": {"allocation_lock_id": "", "allocation_lock_expires_at": ""},
+            },
+        )
+        if finalized.modified_count != 1:
+            linked_tenant = await db.tenants.find_one(
+                {"tenant_application_id": application_id, "hostel_id": hostel_id},
+                {"_id": 0},
+            )
+            if not linked_tenant:
+                raise HTTPException(409, "Tenant was created but the application could not be finalized; retry safely.")
+            tenant = _safe_owner_tenant_summary(linked_tenant)
+        refreshed = await db.tenant_applications.find_one({"id": application_id}, {"_id": 0})
+        return {"application": _tenant_application_response(refreshed), "tenant": tenant}
+    except Exception:
+        await db.tenant_applications.update_one(
+            {
+                "id": application_id,
+                "owner_id": user["id"],
+                "hostel_id": hostel_id,
+                "status": "allocating",
+                "allocation_lock_id": lock_id,
+            },
+            {
+                "$set": {"status": "approved"},
+                "$unset": {"allocation_lock_id": "", "allocation_lock_expires_at": ""},
+            },
+        )
+        raise
 
 
 @api.get("/owner/tenants/{tenant_id}")
@@ -6212,6 +6783,56 @@ async def _ensure_tenant_upi_reference_index():
     )
 
 
+async def _ensure_tenant_registration_indexes():
+    await db.tenant_registration_tokens.create_index(
+        "id",
+        unique=True,
+        name="tenant_registration_token_id",
+    )
+    await db.tenant_registration_tokens.create_index(
+        "token",
+        unique=True,
+        name="tenant_registration_token_value",
+    )
+    await db.tenant_registration_tokens.create_index(
+        "hostel_id",
+        unique=True,
+        partialFilterExpression={"active": True},
+        name="tenant_registration_one_active_per_hostel",
+    )
+    await db.tenant_applications.create_index(
+        "id",
+        unique=True,
+        name="tenant_application_id",
+    )
+    await db.tenant_applications.create_index(
+        [("owner_id", 1), ("hostel_id", 1), ("created_at", -1)],
+        name="tenant_application_owner_hostel_created",
+    )
+    await db.tenant_applications.create_index(
+        "duplicate_key",
+        unique=True,
+        partialFilterExpression={"duplicate_key": {"$type": "string"}},
+        name="tenant_application_active_mobile",
+    )
+    await db.tenant_application_rate_limits.create_index(
+        "id",
+        unique=True,
+        name="tenant_application_rate_limit_id",
+    )
+    await db.tenant_application_rate_limits.create_index(
+        "expires_at",
+        expireAfterSeconds=0,
+        name="tenant_application_rate_limit_ttl",
+    )
+    await db.tenants.create_index(
+        "tenant_application_id",
+        unique=True,
+        partialFilterExpression={"tenant_application_id": {"$type": "string"}},
+        name="tenant_application_tenant_idempotency",
+    )
+
+
 @app.on_event("startup")
 async def startup():
     _validate_production_config()
@@ -6223,6 +6844,7 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
     await _ensure_tenant_aadhaar_claim_index()
+    await _ensure_tenant_registration_indexes()
     await db.tenant_history_share_codes.create_index("id", unique=True, name="tenant_history_share_code_id")
     await db.tenant_history_share_codes.create_index("code_hash", unique=True, name="tenant_history_share_code_hash")
     await db.tenant_history_share_codes.create_index(
