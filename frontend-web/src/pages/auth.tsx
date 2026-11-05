@@ -97,21 +97,49 @@ function GoogleButton({ onToken }: { onToken: (token: string) => Promise<void> }
   );
 }
 
-function AuthScaffold({ children, title }: { children: React.ReactNode; title: string }) {
+function AuthScaffold({ children, title, variant }: { children: React.ReactNode; title: string; variant?: "login" | "register" }) {
+  const isDesignedAuthPage = Boolean(variant);
   return (
-    <div className="auth-page">
+    <div className={`auth-page${variant ? ` auth-page-${variant}` : ""}`}>
       <section className="auth-intro">
-        <Brand />
-        <h1>Manage and discover hostels, all in one place.</h1>
-        <p className="muted">Hostel360 brings hostel owners and residents together.</p>
+        <div className="auth-intro-copy">
+          <Brand />
+          <h1>{variant === "register" ? "Find your place to feel at home." : "Welcome Back!"}</h1>
+          <p className="muted">{variant === "register" ? "Create your account and make hostel living simpler." : "Sign in to continue to your hostel management dashboard."}</p>
+        </div>
+        {isDesignedAuthPage && (
+          <svg className="auth-city" viewBox="0 0 560 310" fill="none" aria-hidden="true">
+            <path d="M28 277h515" stroke="#fff" strokeOpacity=".7" strokeWidth="3" />
+            <path d="M70 277V158l75-47 83 47v119M228 277V119l98-63 94 63v158M382 277V148l65-40 74 40v129" fill="#0b438d" stroke="#083a82" strokeLinejoin="round" strokeWidth="8" />
+            <path d="M90 173h28v30H90zM145 145h30v34h-30zM111 220h32v57h-32zM257 137h36v39h-36zM332 123h39v44h-39zM257 197h36v37h-36zM332 191h39v86h-39zM412 166h27v34h-27zM474 163h27v38h-27zM429 222h30v55h-30z" fill="#ffd98b" />
+            <path d="M47 277h486M232 104l94-61 95 61M379 137l68-42 76 43" stroke="#8cc8ff" strokeLinecap="round" strokeWidth="7" />
+            <path d="m0 264 130-45 93 23 126-44 97 23 114-53v142H0z" fill="#0876d9" fillOpacity=".42" />
+          </svg>
+        )}
       </section>
       <main className="auth-form-wrap">
         <Card className="auth-card">
-          <Brand />
+          {isDesignedAuthPage && (
+            <span className="auth-emblem" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none">
+                <path d="M6 22 24 7l18 15M11 20v21h26V20M19 41V27h10v14M17 22v-5M31 22v-5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
+              </svg>
+            </span>
+          )}
+          {!isDesignedAuthPage && <Brand />}
           <h1>{title}</h1>
+          {isDesignedAuthPage && <p className="auth-subtitle">{variant === "register" ? "Get started with your Hostel360 account" : "Enter your credentials to access your account"}</p>}
           {children}
         </Card>
       </main>
+      {isDesignedAuthPage && (
+        <footer className="auth-footer">
+          <svg viewBox="0 0 180 52" fill="none" aria-hidden="true">
+            <path d="M5 48h170M20 48V32h17v16M43 48V17h24v31M72 48V7h32v41M109 48V25h22v23M137 48V34h20v14M27 32v-8l7-6 7 6v8M77 18h8v8h-8zM91 18h8v8h-8zM77 31h8v8h-8zM91 31h8v8h-8zM116 31h8v8h-8z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+          </svg>
+          <span>Better Living. Brighter Future.</span>
+        </footer>
+      )}
     </div>
   );
 }
@@ -151,7 +179,7 @@ export function LoginPage() {
     finally { setBusy(false); }
   };
   return (
-    <AuthScaffold title="Sign in">
+    <AuthScaffold title="Sign In" variant="login">
       <form className="form" onSubmit={(event) => void submit(event)}>
         {sessionError && <><AlertMessage tone="error">Could not restore your previous session: {sessionError}</AlertMessage><Button kind="secondary" onClick={() => void refresh()}>Retry session</Button></>}
         <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="you@example.com" required />
@@ -208,7 +236,7 @@ export function RegisterPage() {
     finally { setBusy(false); }
   };
   return (
-    <AuthScaffold title="Create account">
+    <AuthScaffold title="Create Account" variant="register">
       <form className="form" onSubmit={(event) => void submit(event)}>
         <Field label="I am a" value={role} onChange={(value) => setRole(value as "tenant" | "owner")} options={["tenant", "owner"]} />
         <Field label="Full name" value={name} onChange={setName} placeholder="Enter your full name" required />
