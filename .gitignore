@@ -1,7 +1,4 @@
 
-
-/package-lock.json
-
 # IDE and editors
 .idea/
 .vscode/
@@ -57,7 +54,6 @@ venv/
 /backend/tests/__pycache__/
 /backend/uploads/
 /frontend/node_modules.sdk57-stale-20261024-2317/
-/frontend/package-lock.backup.json
 /frontend/package-lock.json.backup
 /frontend/package-lock.json.sdk58-backup
 /frontend/package.json.backup
@@ -65,3 +61,30 @@ venv/
 /package-lock.json
 /frontend/package.backup.json
 /tel360Hostel360
+
+# Development tools
+chainlit.md
+.chainlit
+.ipynb_checkpoints/
+.ac
+
+# Deployment
+.vercel
+
+# Data and databases
+agenthub/agents/youtube/db
+
+# Archive files and large assets
+**/*.zip
+**/*.tar.gz
+**/*.tar
+**/*.tgz
+*.pack
+*.deb
+*.dylib
+
+# Build caches
+.cache/
+
+# Mobile development
+android-sdk/
