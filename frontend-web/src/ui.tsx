@@ -166,6 +166,19 @@ const menus: Record<User["role"], { label: string; path: string }[]> = {
   ],
 };
 
+function AdminNavigationIcon({ path }: { path: string }) {
+  const icon = {
+    "/admin": <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></>,
+    "/admin/hostels": <><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 9h.01M15 9h.01M9 12h.01M15 12h.01" /></>,
+    "/admin/owners": <><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM20 8v6M23 11h-6" /></>,
+    "/admin/plans": <><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z" /></>,
+    "/admin/advertisements": <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m21 15-5-5L5 20" /></>,
+    "/admin/referrals": <><circle cx="6" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.5 8.5 15.5 15.5M14 6h4v4" /></>,
+  }[path];
+
+  return <svg className="admin-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icon}</svg>;
+}
+
 export function ProtectedLayout({ role }: { role: User["role"] }) {
   const { user, loading, logout } = useAuth();
   const location = useLocation();
@@ -177,7 +190,7 @@ export function ProtectedLayout({ role }: { role: User["role"] }) {
   if (user.role !== role) return <Navigate to={user.role === "admin" ? "/admin" : user.role === "owner" ? "/owner" : "/tenant"} replace />;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${role === "admin" ? " app-shell-admin" : ""}`}>
       <header className="topbar">
         <div className="topbar-brand"><button className="mobile-menu-toggle" type="button" aria-label={navigationOpen ? "Close navigation" : "Open navigation"} aria-expanded={navigationOpen} aria-controls="primary-navigation" onClick={() => setNavigationOpen((open) => !open)}><span /><span /><span /></button><Brand /></div>
         <div className="account-chip"><span className="account-name">{user.name || user.email}</span><Button kind="ghost" onClick={logout}>Log out</Button></div>
@@ -185,9 +198,10 @@ export function ProtectedLayout({ role }: { role: User["role"] }) {
       {navigationOpen && <button className="mobile-nav-backdrop" type="button" aria-label="Close navigation" onClick={() => setNavigationOpen(false)} />}
       <div className="workspace">
         <aside className={`sidebar${navigationOpen ? " open" : ""}`}>
+          {role === "admin" && <div className="admin-sidebar-brand"><Brand /></div>}
           <div className="sidebar-profile"><b>{user.name || user.email}</b><span>{role === "admin" ? "Administrator" : role === "owner" ? "Hostel owner" : "Tenant"}</span></div>
           <nav id="primary-navigation" aria-label={`${role} navigation`}>
-            {menus[role].map((item) => <Link key={item.path} className={location.pathname === item.path || (item.path !== `/${role}` && location.pathname.startsWith(`${item.path}/`)) ? "active" : ""} to={item.path}>{item.label}</Link>)}
+            {menus[role].map((item) => <Link key={item.path} className={`${location.pathname === item.path || (item.path !== `/${role}` && location.pathname.startsWith(`${item.path}/`)) ? "active" : ""}${role === "admin" ? " admin-nav-link" : ""}`} to={item.path}>{role === "admin" && <AdminNavigationIcon path={item.path} />}{item.label}</Link>)}
             {role === "owner" && <>
               <Link className={location.pathname === "/owner/tenant-registration" ? "active" : ""} to="/owner/tenant-registration">Tenant registration</Link>
               <Link className={location.pathname === "/owner/tenant-alerts" ? "active" : ""} to="/owner/tenant-alerts">Alerts</Link>
