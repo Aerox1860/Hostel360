@@ -9,9 +9,34 @@ function ErrorBox({ error }: { error: string }) {
   return error ? <AlertMessage tone="error">{error}</AlertMessage> : null;
 }
 
+function AdminStatCard({ label, value, icon, tone }: { label: string; value: unknown; icon: string; tone: string }) {
+  return <Card className="admin-stat-card">
+    <span className={`admin-stat-icon ${tone}`} aria-hidden="true">{icon}</span>
+    <span className="muted">{label}</span>
+    <div className="stat">{String(value ?? "—")}</div>
+  </Card>;
+}
+
+function AdminOverviewBars({ title, description, items }: { title: string; description: string; items: { label: string; value: number; tone: string }[] }) {
+  const maximum = Math.max(1, ...items.map((item) => item.value));
+  return <Card className="admin-chart-card stack">
+    <div><h2>{title}</h2><p className="muted small">{description}</p></div>
+    <div className="admin-chart-bars">
+      {items.map((item) => <div className="admin-chart-row" key={item.label}>
+        <div className="spread"><span>{item.label}</span><b>{item.value.toLocaleString("en-IN")}</b></div>
+        <div className="admin-chart-track" role="img" aria-label={`${item.label}: ${item.value}`}>
+          <span className={item.tone} style={{ width: `${Math.max(item.value ? 4 : 0, (item.value / maximum) * 100)}%` }} />
+        </div>
+      </div>)}
+    </div>
+  </Card>;
+}
+
 export function AdminDashboardPage() {
   const [stats, setStats] = useState<JsonRecord | null>(null);
   const [pending, setPending] = useState<JsonRecord[]>([]);
+  const [plans, setPlans] = useState<JsonRecord[]>([]);
+  const [plansError, setPlansError] = useState("");
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     try {
@@ -21,6 +46,10 @@ export function AdminDashboardPage() {
       ]);
       setStats(dashboard); setPending(hostels.hostels); setError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load admin overview."); }
+    try {
+      const result = await api.get<{ plans: JsonRecord[] }>("/plans");
+      setPlans(result.plans); setPlansError("");
+    } catch (reason) { setPlansError(reason instanceof Error ? reason.message : "Could not load subscription plans."); }
   }, []);
   useEffect(() => { void load(); }, [load]);
   const verify = async (id: string, action: string) => {
@@ -28,18 +57,89 @@ export function AdminDashboardPage() {
     try { await api.post(`/admin/hostels/${encodeURIComponent(id)}/verify`, { action, ...(action === "approve" ? { site_visit_status: "verified" } : {}) }); await load(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update hostel verification."); }
   };
-  return <Page title="Platform Overview" subtitle="Review platform activity and pending hostel listings">
+  const count = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+  return <Page title="Platform Overview" subtitle="Review platform activity and pending hostel listings" actions={<Button kind="secondary" onClick={() => void load()}>Refresh overview</Button>}>
     <ErrorBox error={error} />
-    {stats && <div className="grid">{[
-      ["Total Hostels", stats.total_hostels], ["Total Owners", stats.total_owners], ["Active Owners", stats.active_owners],
-      ["Inactive Owners", stats.inactive_owners], ["Premium Plans", stats.premium_plans], ["Total Revenue", `₹${stats.total_revenue}`],
-      ["Expired Plans", stats.expired_plans], ["New Registrations", stats.new_registrations],
-    ].map(([label, value]) => <Card key={String(label)}><span className="muted">{label}</span><div className="stat">{value ?? "—"}</div></Card>)}</div>}
-    <Card className="stack"><div className="spread"><h2>Pending Verification</h2><span className="badge warning">{pending.length}</span></div>
-      {pending.map((hostel) => <article className="card stack" key={hostel.id}><b>{hostel.name}</b><p>{hostel.owner_name} · {hostel.mobile}</p><p>{hostel.address}, {hostel.city}</p>
-        <div className="row"><Button onClick={() => void verify(hostel.id, "approve")}>Approve</Button><Button kind="danger" onClick={() => void verify(hostel.id, "reject")}>Reject</Button></div></article>)}
-      {!pending.length && <p>No hostels pending verification.</p>}
-    </Card>
+    <section className="admin-hero">
+      <div className="admin-hero-copy">
+        <span className="admin-hero-eyebrow">GOLIVEHOSTEL360 · PLATFORM ADMIN</span>
+        <h2>Manage a better hostel experience.</h2>
+        <p>Your live view of platform growth, subscriptions, owners and verification activity.</p>
+        <Link className="admin-hero-action" to="/admin/hostels">Review hostels <span aria-hidden="true">→</span></Link>
+      </div>
+      <svg className="admin-hero-art" viewBox="0 0 520 300" fill="none" aria-hidden="true">
+        <path d="M37 263h460" stroke="#fff" strokeOpacity=".52" strokeWidth="2" />
+        <path d="M70 263V133l73-45 74 45v130M202 263V96l94-59 94 59v167M369 263V145l62-38 62 38v118" fill="#0B1F44" stroke="#0B1F44" strokeLinejoin="round" strokeWidth="7" />
+        <path d="M91 150h23v28H91zM151 121h24v30h-24zM116 197h28v66h-28zM229 118h31v34h-31zM325 112h31v39h-31zM229 171h31v38h-31zM325 174h31v89h-31zM390 163h25v32h-25zM451 161h24v35h-24zM405 215h29v48h-29z" fill="#8DE1DD" />
+        <path d="m52 252 92-41 87 30 88-47 82 37 114-64v96H52Z" fill="#20A39E" fillOpacity=".42" />
+        <path d="M203 83 296 25l96 59M366 131l65-40 65 40" stroke="#B8F4F0" strokeLinecap="round" strokeWidth="6" />
+        <circle cx="430" cy="48" r="18" fill="#fff" fillOpacity=".2" />
+        <circle cx="430" cy="48" r="9" fill="#fff" fillOpacity=".55" />
+      </svg>
+    </section>
+    {stats && <>
+      <div className="grid admin-stat-grid">
+        <AdminStatCard label="Total hostels" value={stats.total_hostels} icon="⌂" tone="blue" />
+        <AdminStatCard label="Total owners" value={stats.total_owners} icon="♙" tone="cyan" />
+        <AdminStatCard label="Active owners" value={stats.active_owners} icon="✓" tone="green" />
+        <AdminStatCard label="Inactive owners" value={stats.inactive_owners} icon="◷" tone="amber" />
+        <AdminStatCard label="Premium plans" value={stats.premium_plans} icon="✦" tone="violet" />
+        <AdminStatCard label="Total revenue" value={`₹${count(stats.total_revenue).toLocaleString("en-IN")}`} icon="₹" tone="blue" />
+        <AdminStatCard label="Expired plans" value={stats.expired_plans} icon="↻" tone="rose" />
+        <AdminStatCard label="New registrations" value={stats.new_registrations} icon="↗" tone="cyan" />
+      </div>
+      <div className="grid admin-overview-charts">
+        <AdminOverviewBars title="Platform Growth" description="Live platform totals and recent registrations" items={[
+          { label: "Hostels", value: count(stats.total_hostels), tone: "blue" },
+          { label: "Owners", value: count(stats.total_owners), tone: "teal" },
+          { label: "New registrations", value: count(stats.new_registrations), tone: "green" },
+        ]} />
+        <AdminOverviewBars title="Plan status" description="Current active and expired subscriptions" items={[
+          { label: "Premium plans", value: count(stats.premium_plans), tone: "violet" },
+          { label: "Expired plans", value: count(stats.expired_plans), tone: "rose" },
+        ]} />
+      </div>
+    </>}
+    <div className="grid admin-dashboard-bottom">
+      <Card className="stack admin-pending-card">
+        <div className="spread"><div><h2>Recent Activity</h2><p className="muted small">Hostel listings currently waiting for verification.</p></div><span className="badge warning">{pending.length} pending</span></div>
+        <div className="admin-activity-list">
+          {pending.slice(0, 4).map((hostel) => <article className="admin-activity-item" key={hostel.id}>
+            <div className="admin-activity-row">
+              <span className="admin-activity-marker" aria-hidden="true">⌂</span>
+              <div className="admin-activity-copy"><b>{hostel.name}</b><span>{hostel.owner_name} · {hostel.city}</span></div>
+              <span className="badge warning">Pending</span>
+            </div>
+            <div className="admin-activity-controls">
+              <Button onClick={() => void verify(hostel.id, "approve")}>Approve</Button>
+              <Button kind="danger" onClick={() => void verify(hostel.id, "reject")}>Reject</Button>
+            </div>
+          </article>)}
+          {!pending.length && <p>No hostels pending verification.</p>}
+        </div>
+        <Link className="admin-inline-link" to="/admin/hostels">Open verification queue <span aria-hidden="true">→</span></Link>
+      </Card>
+      <div className="stack admin-dashboard-side">
+        <Card className="stack admin-quick-actions">
+          <div><h2>Quick Actions</h2><p className="muted small">Jump to a platform workspace.</p></div>
+          <div className="admin-action-links">
+            <Link to="/admin/hostels"><span className="admin-action-icon teal">⌂</span><span>Review hostels</span><span aria-hidden="true">→</span></Link>
+            <Link to="/admin/owners"><span className="admin-action-icon blue">♙</span><span>Manage owners</span><span aria-hidden="true">→</span></Link>
+            <Link to="/admin/advertisements"><span className="admin-action-icon violet">▧</span><span>Advertisements</span><span aria-hidden="true">→</span></Link>
+          </div>
+        </Card>
+        <Card className="stack admin-subscription-card">
+          <div className="spread"><div><h2>Subscription Plans</h2><p className="muted small">Available platform plans</p></div><Link className="admin-inline-link" to="/admin/plans">Manage</Link></div>
+          <ErrorBox error={plansError} />
+          {plans.slice(0, 3).map((plan) => <div className="admin-plan-row" key={plan.id}>
+            <span className="admin-plan-badge" aria-hidden="true">✦</span>
+            <div><b>{plan.name}</b><span>{plan.duration_months} months · ₹{Number(plan.price).toLocaleString("en-IN")}</span></div>
+            <span className={`badge ${plan.active ? "success" : ""}`}>{plan.active ? "Active" : "Inactive"}</span>
+          </div>)}
+          {!plansError && !plans.length && <p className="muted small">No subscription plans are available.</p>}
+        </Card>
+      </div>
+    </div>
   </Page>;
 }
 
@@ -73,7 +173,7 @@ export function AdminHostelsPage() {
   };
   return <Page title="Hostel Verification" subtitle="Review and manage all listings">
     <ErrorBox error={error} />
-    <div className="row">{["all", "pending", "approved", "suspended", "rejected"].map((item) => <Button key={item} kind={filter === item ? "primary" : "secondary"} onClick={() => setFilter(item)}>{item}</Button>)}</div>
+    <div className="row admin-filter-row">{["all", "pending", "approved", "suspended", "rejected"].map((item) => <Button key={item} kind={filter === item ? "primary" : "secondary"} onClick={() => setFilter(item)}>{item}</Button>)}</div>
     <div className="grid">{hostels.map((hostel) => <Card className="stack" key={hostel.id}>
       <div className="spread"><div><h2>{hostel.name}</h2><p>{hostel.owner_name} · {hostel.city}, {hostel.state}</p></div><span className="badge">{hostel.status}</span></div>
       <p>Verification: {hostel.verification_status || "Unverified"} · Site visit: {hostel.site_visit_status || "Pending"}</p>{hostel.premium_plan && <p>Plan: {hostel.premium_plan}</p>}
