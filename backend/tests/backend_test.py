@@ -1,7 +1,4 @@
-"""Hostel 360 backend test suite (pytest).
-
-Covers: auth, public search, admin, owner CRUD, tenant, payments (400 when Stripe not configured).
-"""
+"""Hostel 360 backend API smoke tests."""
 import os
 import uuid
 import pytest
@@ -127,10 +124,10 @@ class TestPublic:
         for hh in r.json()["hostels"]:
             assert (hh.get("min_rent") or 0) <= 6000
 
-    def test_detail(self, s):
+    def test_detail(self, s, admin_token):
         r = s.get(f"{API}/public/hostels")
         hid = r.json()["hostels"][0]["id"]
-        d = s.get(f"{API}/public/hostels/{hid}")
+        d = s.get(f"{API}/public/hostels/{hid}", headers=h(admin_token))
         assert d.status_code == 200
         hostel = d.json()["hostel"]
         assert "reviews" in hostel
@@ -185,7 +182,7 @@ class TestAdmin:
 
     def test_plans_crud(self, s, admin_token):
         # create
-        payload = {"name": "TEST_Plan", "duration_months": 2, "price": 12.34, "features": ["a"], "active": True}
+        payload = {"name": "TEST_Plan", "duration_months": 2, "price": 12.34, "gst_rate": 18, "features": ["a"], "active": True}
         r = s.post(f"{API}/admin/plans", json=payload, headers=h(admin_token))
         assert r.status_code == 200
         pid = r.json()["plan"]["id"]
@@ -222,7 +219,7 @@ class TestOwner:
 
     def test_room_add_and_delete(self, s, owner_token):
         rno = f"TEST{uuid.uuid4().hex[:4].upper()}"
-        payload = {"floor": "3", "room_number": rno, "room_type": "single", "rent": 8888, "bed_count": 1}
+        payload = {"floor": "3", "room_number": rno, "rent": 8888, "bed_count": 1}
         r = s.post(f"{API}/owner/rooms", json=payload, headers=h(owner_token))
         assert r.status_code == 200
         rid = r.json()["room"]["id"]
@@ -362,10 +359,10 @@ class TestPayments:
         assert r.status_code == 400
         assert "not configured" in r.json().get("detail", "").lower()
 
-    def test_rent_checkout_400(self, s, tenant_token):
+    def test_rent_checkout_uses_manual_upi_flow(self, s, tenant_token):
         r = s.post(f"{API}/payments/rent/checkout", json={}, headers=h(tenant_token))
-        assert r.status_code == 400
-        assert "not configured" in r.json().get("detail", "").lower()
+        assert r.status_code == 410
+        assert "manual UPI" in r.json().get("detail", "")
 
     def test_sub_checkout_requires_owner(self, s, tenant_token):
         plans = s.get(f"{API}/plans").json()["plans"]

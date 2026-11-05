@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Hostel360",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.pgmanager.yjnx0r",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Upload photos to showcase your hostel"
+        "NSPhotoLibraryUsageDescription": "Select photos to manage hostel listings and rules.",
+        "NSCameraUsageDescription": "Take photos of hostel rules and regulations."
       }
     },
     "android": {
@@ -20,9 +20,11 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.emergent.pgmanager.yjnx0r",
-      "permissions": ["READ_MEDIA_IMAGES"]
+      "permissions": [
+        "READ_MEDIA_IMAGES",
+        "CAMERA"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -31,19 +33,37 @@
     },
     "plugins": [
       "expo-router",
-      "expo-image-picker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Select photos to manage hostel listings and rules.",
+          "cameraPermission": "Take photos of hostel rules and regulations."
+        }
+      ],
       [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
+          "imageWidth": 300,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#F0F5F1"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-secure-store",
+      "expo-sharing",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "75ab900b-a46b-4439-b58e-45207591f809"
+      }
     }
   }
 }

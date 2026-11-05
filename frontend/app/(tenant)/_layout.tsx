@@ -17,6 +17,8 @@ export default function TenantLayout() {
       <Tabs.Screen name="payments" options={{ title: "Payments", tabBarIcon: ({ color, size }) => <Ionicons name="receipt" color={color} size={size} /> }} />
       <Tabs.Screen name="complaints" options={{ title: "Support", tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" color={color} size={size} /> }} />
       <Tabs.Screen name="notices" options={{ title: "Notices", tabBarIcon: ({ color, size }) => <Ionicons name="megaphone" color={color} size={size} /> }} />
+      <Tabs.Screen name="policy-review" options={{ href: null, tabBarStyle: { display: "none" } }} />
+      <Tabs.Screen name="history-sharing" options={{ href: null, tabBarStyle: { display: "none" } }} />
     </Tabs>
   );
 }

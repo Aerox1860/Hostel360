@@ -1,4 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # IDE and editors
 .idea/
@@ -6,51 +5,62 @@
 
 # Dependencies
 node_modules/
-/node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
-# Testing
-/coverage
-
-# Next.js
-/.next/
-/out/
-next-env.d.ts
+# Test/build output and caches
+/coverage/
+/build/
+dist/
+.expo/
+.cache/
 *.tsbuildinfo
 
-# Production builds
-/build
-dist/
-dist
-
-# Environment files (comprehensive coverage)
-
+# Local secrets and credentials
+/.env
+.env
+.env.*
+*.env
 *token.json*
 *credentials.json*
+credentials.json
+*.pem
+*.key
+.credentials
+memory/test_credentials.md
 
-# Logs and debug files
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-dump.rdb
-
-# System files
-.DS_Store
-*.pem
 
 # Python
 __pycache__/
-*pyc*
+*.py[cod]
 venv/
 .venv/
+
+# Keep local secrets and runtime data out of Git
+/backend/.env
+/backend/.env.*
+!/backend/.env.example
+/frontend/.env
+/frontend/.env.*
+!/frontend/.env.example
+/backend/google.txt
+/backend/__pycache__/
+/backend/tests/__pycache__/
+/backend/uploads/
+/frontend/node_modules.sdk57-stale-20261024-2317/
+/frontend/package-lock.json.backup
+/frontend/package-lock.json.sdk58-backup
+/frontend/package.json.backup
+/frontend/package.json.sdk58-backup
+/package-lock.json
+/frontend/package.backup.json
+/tel360Hostel360
 
 # Development tools
 chainlit.md
@@ -76,16 +86,5 @@ agenthub/agents/youtube/db
 # Build caches
 .cache/
 
-memory/test_credentials.md
-
 # Mobile development
 android-sdk/
-.env
-.env.*
-*.env
-credentials.json
-*.key
-.credentials
-/frontend-web/.env
-/frontend-web/.env.*
-!/frontend-web/.env.example

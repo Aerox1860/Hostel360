@@ -1,0 +1,8 @@
+api.golivehostel360.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000 {
+		health_uri /readyz
+		health_interval 30s
+		health_timeout 5s
+	}
+}

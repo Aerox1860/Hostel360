@@ -17,6 +17,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="hostels" options={{ title: "Hostels", tabBarIcon: ({ color, size }) => <Ionicons name="business" color={color} size={size} /> }} />
       <Tabs.Screen name="plans" options={{ title: "Plans", tabBarIcon: ({ color, size }) => <Ionicons name="pricetags" color={color} size={size} /> }} />
       <Tabs.Screen name="owners" options={{ title: "Owners", tabBarIcon: ({ color, size }) => <Ionicons name="people" color={color} size={size} /> }} />
+      <Tabs.Screen name="advertisements" options={{ title: "Ads", tabBarIcon: ({ color, size }) => <Ionicons name="megaphone" color={color} size={size} /> }} />
     </Tabs>
   );
 }

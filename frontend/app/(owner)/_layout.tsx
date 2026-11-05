@@ -20,6 +20,8 @@ export default function OwnerLayout() {
       <Tabs.Screen name="tenants" options={{ title: "Tenants", tabBarIcon: ({ color, size }) => <Ionicons name="people" color={color} size={size} /> }} />
       <Tabs.Screen name="money" options={{ title: "Money", tabBarIcon: ({ color, size }) => <Ionicons name="wallet" color={color} size={size} /> }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: ({ color, size }) => <Ionicons name="ellipsis-horizontal-circle" color={color} size={size} /> }} />
+      <Tabs.Screen name="rules" options={{ href: null }} />
+      <Tabs.Screen name="tenant-alerts" options={{ href: null }} />
     </Tabs>
     </OwnerHostelProvider>
   );

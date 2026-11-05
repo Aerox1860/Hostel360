@@ -6,6 +6,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Screen, T, Btn, Badge, Card, Row, LoadingView, Sheet, Field } from "@/src/components/ui";
 import { api } from "@/src/api/client";
 import { useToast } from "@/src/components/Toast";
+import { useAuth } from "@/src/context/AuthContext";
+import { propertyTypeLabel } from "@/src/utils/propertyType";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
 const AMENITY_ICON: Record<string, any> = {
@@ -20,6 +22,7 @@ const W = Dimensions.get("window").width;
 
 export default function HostelDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user, loading: authLoading } = useAuth();
   const toast = useToast();
   const [hostel, setHostel] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -32,6 +35,7 @@ export default function HostelDetail() {
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
+    if (authLoading || !user) return;
     try {
       const { hostel } = await api.get<{ hostel: any }>(`/public/hostels/${id}`);
       setHostel(hostel);
@@ -40,11 +44,16 @@ export default function HostelDetail() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [authLoading, id, toast, user]);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      router.replace({ pathname: "/(auth)/login", params: { propertyId: id } });
+      return;
+    }
     load();
-  }, [load]);
+  }, [authLoading, id, load, user]);
 
   const openEnquiry = (t: "enquiry" | "site_visit" | "callback") => {
     setEnqType(t);
@@ -76,7 +85,7 @@ export default function HostelDetail() {
     }
   };
 
-  if (loading) return <Screen bg={colors.surface}><LoadingView /></Screen>;
+  if (authLoading || !user || loading) return <Screen bg={colors.surface}><LoadingView /></Screen>;
   if (!hostel) return <Screen bg={colors.surface}><LoadingView label="Not found" /></Screen>;
 
   const photos: string[] = hostel.photos?.length ? hostel.photos : [];
@@ -123,6 +132,7 @@ export default function HostelDetail() {
           </View>
 
           <Row style={{ gap: spacing.sm, flexWrap: "wrap" }}>
+            <Badge label={propertyTypeLabel(hostel.property_type)} tone="brand" />
             <Badge label={hostel.pg_name || "PG"} tone="brand" />
             {hostel.available_beds != null ? <Badge label={`${hostel.available_beds} beds available`} tone="success" /> : null}
           </Row>
@@ -130,13 +140,13 @@ export default function HostelDetail() {
           {/* Room options */}
           {hostel.room_options?.length ? (
             <View style={{ gap: spacing.sm }}>
-              <T weight="bold" size={type.lg}>Room Types</T>
+              <T weight="bold" size={type.lg}>Room Options</T>
               {hostel.room_options.map((r: any, i: number) => (
                 <Card key={i} style={{ padding: spacing.md }}>
                   <Row style={{ justifyContent: "space-between" }}>
                     <Row style={{ gap: spacing.sm }}>
                       <Ionicons name="bed-outline" size={18} color={colors.brand} />
-                      <T weight="semibold" style={{ textTransform: "capitalize" }}>{r.room_type} Sharing</T>
+                      <T weight="semibold">{r.bed_count} {r.bed_count === 1 ? "Bed" : "Beds"}</T>
                     </Row>
                     <T weight="extrabold" color={colors.brand}>₹{r.rent}/mo</T>
                   </Row>

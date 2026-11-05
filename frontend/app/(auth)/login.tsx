@@ -1,20 +1,33 @@
 import { useState } from "react";
-import { View, Pressable, Image } from "react-native";
+import { View, Pressable, Platform } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, T, Field, Btn, Row } from "@/src/components/ui";
 import { Logo } from "@/src/components/Logo";
-import { useAuth, routeForRole } from "@/src/context/AuthContext";
+import { GoogleSignInButton } from "@/src/components/GoogleSignInButton";
+import { useAuth, routeAfterAuthentication } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
 import { colors, spacing, radius, type } from "@/src/theme";
 
 export default function Login() {
-  const { login, loginWithGoogle } = useAuth();
+  const { propertyId } = useLocalSearchParams<{ propertyId?: string | string[] }>();
+  const {
+    login,
+    loginWithGoogle,
+    loginWithGoogleToken,
+    linkPendingGoogleAccount,
+    googleLinkPending,
+  } = useAuth();
   const toast = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const selectedPropertyId = Array.isArray(propertyId) ? propertyId[0] : propertyId;
+  const directGoogleWebEnabled =
+    Platform.OS === "web" &&
+    process.env.EXPO_PUBLIC_GOOGLE_DIRECT_SIGNIN_ENABLED === "true" &&
+    Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
 
   const onLogin = async () => {
     if (!email || !password) {
@@ -24,12 +37,40 @@ export default function Login() {
     setLoading(true);
     try {
       const user = await login(email.trim(), password);
-      toast.show(`Welcome back, ${user.name || "there"}!`);
-      router.replace(routeForRole(user.role) as any);
+      if (googleLinkPending && !user.must_change_password) {
+        try {
+          await linkPendingGoogleAccount();
+          toast.show("Google Sign-In linked to your account");
+        } catch (error: any) {
+          toast.show(error.message || "Could not link Google Sign-In", "error");
+        }
+      }
+      if (user.must_change_password) {
+        toast.show("Set a new password to continue", "info");
+      } else {
+        toast.show(`Welcome back, ${user.name || "there"}!`);
+      }
+      router.replace(routeAfterAuthentication(user, selectedPropertyId) as any);
     } catch (e: any) {
       toast.show(e.message || "Login failed", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onGooglePress = async () => {
+    try {
+      await loginWithGoogle(selectedPropertyId);
+    } catch (error: any) {
+      toast.show(error.message || "Google Sign-In failed", "error");
+    }
+  };
+
+  const onGoogleCredential = async (idToken: string) => {
+    try {
+      await loginWithGoogleToken(idToken, selectedPropertyId);
+    } catch (error: any) {
+      toast.show(error.message || "Google Sign-In failed", "error");
     }
   };
 
@@ -87,16 +128,34 @@ export default function Login() {
           <View style={{ flex: 1, height: 1, backgroundColor: colors.divider }} />
         </Row>
 
-        <Pressable testID="login-google" onPress={loginWithGoogle} style={googleStyle}>
-          <Ionicons name="logo-google" size={20} color={colors.onSurface} />
-          <T weight="bold" size={type.lg}>
-            Continue with Google
+        {directGoogleWebEnabled ? (
+          <GoogleSignInButton
+            onCredential={onGoogleCredential}
+            onError={(error) => toast.show(error.message || "Google Sign-In failed", "error")}
+          />
+        ) : (
+          <Pressable testID="login-google" onPress={onGooglePress} style={googleStyle}>
+            <Ionicons name="logo-google" size={20} color={colors.onSurface} />
+            <T weight="bold" size={type.lg}>
+              Continue with Google
+            </T>
+          </Pressable>
+        )}
+        {googleLinkPending ? (
+          <T size={type.sm} color={colors.onSurfaceSecondary} style={{ textAlign: "center" }}>
+            Sign in with your existing password to securely link this Google account.
           </T>
-        </Pressable>
+        ) : null}
 
         <Row style={{ justifyContent: "center", gap: 4, marginTop: spacing.sm }}>
           <T color={colors.onSurfaceSecondary}>New here?</T>
-          <Pressable testID="go-register" onPress={() => router.push("/(auth)/register" as any)}>
+          <Pressable
+            testID="go-register"
+            onPress={() => router.push({
+              pathname: "/(auth)/register",
+              ...(propertyId ? { params: { propertyId } } : {}),
+            })}
+          >
             <T weight="bold" color={colors.brand}>
               Create an account
             </T>

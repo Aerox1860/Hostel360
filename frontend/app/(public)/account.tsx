@@ -67,6 +67,15 @@ export default function Account() {
               onPress={() => router.replace(routeForRole(user.role) as any)}
               testID="account-dashboard"
             />
+            {user.role === "tenant" ? (
+              <Btn
+                title="Global history sharing"
+                variant="secondary"
+                icon="shield-checkmark-outline"
+                onPress={() => router.push("/(tenant)/history-sharing" as any)}
+                testID="account-history-sharing"
+              />
+            ) : null}
             <Btn title="Browse hostels" variant="secondary" icon="search" onPress={() => router.push("/(public)" as any)} />
             <Btn title="Log out" variant="ghost" icon="log-out" onPress={logout} testID="account-logout" />
           </>

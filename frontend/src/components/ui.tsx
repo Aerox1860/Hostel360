@@ -280,6 +280,7 @@ export function Field({
   keyboardType,
   secureTextEntry,
   multiline,
+  maxLength,
   testID,
   autoCapitalize = "none",
 }: {
@@ -290,6 +291,7 @@ export function Field({
   keyboardType?: "default" | "email-address" | "numeric" | "phone-pad";
   secureTextEntry?: boolean;
   multiline?: boolean;
+  maxLength?: number;
   testID?: string;
   autoCapitalize?: "none" | "sentences" | "words";
 }) {
@@ -309,6 +311,7 @@ export function Field({
         keyboardType={keyboardType}
         secureTextEntry={secureTextEntry}
         multiline={multiline}
+        maxLength={maxLength}
         autoCapitalize={autoCapitalize}
         style={[styles.input, multiline ? { height: 96, textAlignVertical: "top" } : null]}
       />
@@ -373,36 +376,52 @@ export function Sheet({
   onClose,
   title,
   children,
+  centered = false,
 }: {
   visible: boolean;
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
+  centered?: boolean;
 }) {
+  const panel = (
+    <View style={[styles.sheet, centered ? styles.centeredSheet : null]}>
+      <View style={styles.sheetHandle} />
+      {title ? (
+        <View style={styles.sheetHeader}>
+          <T weight="extrabold" size={type.xl}>
+            {title}
+          </T>
+          <Pressable testID="sheet-close" onPress={onClose} hitSlop={10}>
+            <Ionicons name="close" size={24} color={colors.onSurfaceSecondary} />
+          </Pressable>
+        </View>
+      ) : null}
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bottomOffset={20}
+        style={centered ? styles.centeredSheetScroll : null}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing["2xl"], gap: spacing.md }}
+      >
+        {children}
+      </KeyboardAwareScrollView>
+    </View>
+  );
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View style={styles.sheet}>
-        <View style={styles.sheetHandle} />
-        {title ? (
-          <View style={styles.sheetHeader}>
-            <T weight="extrabold" size={type.xl}>
-              {title}
-            </T>
-            <Pressable testID="sheet-close" onPress={onClose} hitSlop={10}>
-              <Ionicons name="close" size={24} color={colors.onSurfaceSecondary} />
-            </Pressable>
-          </View>
-        ) : null}
-        <KeyboardAwareScrollView
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          bottomOffset={20}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing["2xl"], gap: spacing.md }}
-        >
-          {children}
-        </KeyboardAwareScrollView>
-      </View>
+      {centered ? (
+        <SafeAreaView edges={["top", "bottom", "left", "right"]} style={styles.centeredSheetFrame}>
+          <Pressable style={styles.centeredSheetBackdrop} onPress={onClose} />
+          {panel}
+        </SafeAreaView>
+      ) : (
+        <>
+          <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+          {panel}
+        </>
+      )}
     </Modal>
   );
 }
@@ -520,6 +539,26 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.lg,
     maxHeight: "88%",
     paddingTop: spacing.sm,
+  },
+  centeredSheetFrame: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.lg,
+  },
+  centeredSheetBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "rgba(26,29,26,0.45)",
+  },
+  centeredSheet: {
+    width: "100%",
+    maxWidth: 560,
+    maxHeight: "100%",
+    borderRadius: radius.lg,
+  },
+  centeredSheetScroll: {
+    flexShrink: 1,
   },
   sheetHandle: {
     width: 40,

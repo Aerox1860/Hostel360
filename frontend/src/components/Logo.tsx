@@ -33,7 +33,7 @@ export function Logo({ size = 40, showText = true, light = false }: { size?: num
       {showText ? (
         <View>
           <T weight="extrabold" size={size * 0.5} color={textColor}>
-            Hostel{" "}
+            Hostel
             <T weight="extrabold" size={size * 0.5} color={colors.warning}>
               360
             </T>

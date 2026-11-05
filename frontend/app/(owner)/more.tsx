@@ -1,12 +1,13 @@
 import { useCallback, useState } from "react";
-import { View, ScrollView, Pressable, Platform } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { Alert, View, ScrollView, Pressable, Platform } from "react-native";
+import { router, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, EmptyState, Sheet, Btn, Field } from "@/src/components/ui";
+import { Screen, AppHeader, T, Card, Row, Badge, LoadingView, Sheet, Btn, Field } from "@/src/components/ui";
 import { HostelFormSheet } from "@/src/components/HostelFormSheet";
 import { CelebrationOverlay } from "@/src/components/CelebrationOverlay";
+import { SwipeNoticeCard } from "@/src/components/SwipeNoticeCard";
 import { useOwnerHostel } from "@/src/context/OwnerHostelContext";
-import { api, BACKEND_URL } from "@/src/api/client";
+import { api } from "@/src/api/client";
 import { useAuth } from "@/src/context/AuthContext";
 import { useToast } from "@/src/components/Toast";
 import { downloadInvoice } from "@/src/utils/invoice";
@@ -19,6 +20,7 @@ export default function More() {
   const { activeId, activeHostel, refresh: refreshHostels } = useOwnerHostel();
   const [reports, setReports] = useState<any>(null);
   const [hostel, setHostel] = useState<any>(null);
+  const [pendingPaymentAlerts, setPendingPaymentAlerts] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [noticesOpen, setNoticesOpen] = useState(false);
@@ -36,16 +38,24 @@ export default function More() {
   const [editOpen, setEditOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [sub, setSub] = useState<any>(null);
-  const [buying, setBuying] = useState<number | null>(null);
+  const [buying, setBuying] = useState<string | null>(null);
   const [celebrate, setCelebrate] = useState(false);
 
   const load = useCallback(async () => {
-    if (!activeId) { setLoading(false); return; }
+    if (!activeId) { setPendingPaymentAlerts(0); setLoading(false); return; }
+    setPendingPaymentAlerts(0);
     try {
-      const r = await api.get(`/owner/reports?hostel_id=${activeId}`);
-      const { hostel } = await api.get<{ hostel: any }>(`/owner/hostel?hostel_id=${activeId}`);
+      const [r, hostelResponse, alertResponse] = await Promise.all([
+        api.get(`/owner/reports?hostel_id=${encodeURIComponent(activeId)}`),
+        api.get<{ hostel: any }>(`/owner/hostel?hostel_id=${encodeURIComponent(activeId)}`),
+        api.get<{ notifications: any[]; pending_payment_count?: number }>(`/owner/tenant-history/notifications?hostel_id=${encodeURIComponent(activeId)}`),
+      ]);
+      const hostel = hostelResponse.hostel;
       setReports(r);
       setHostel(hostel);
+      setPendingPaymentAlerts(alertResponse.pending_payment_count ?? (alertResponse.notifications || []).filter((notification) =>
+        notification.payment_id && ["pending_owner_approval", "approval_processing"].includes(notification.status),
+      ).length);
     } catch {
     } finally {
       setLoading(false);
@@ -62,12 +72,37 @@ export default function More() {
   const postNotice = async () => {
     if (!nTitle || !nBody) { toast.show("Enter title and message", "error"); return; }
     try {
-      await api.post("/owner/notices", { hostel_id: activeId, title: nTitle, body: nBody });
+      const { notice } = await api.post<{ notice: any }>("/owner/notices", { hostel_id: activeId, title: nTitle, body: nBody });
       toast.show("Notice posted");
       setNTitle(""); setNBody("");
-      const { notices } = await api.get<{ notices: any[] }>(`/owner/notices?hostel_id=${activeId}`);
-      setNotices(notices);
+      setNotices((current) => [notice, ...current.filter((item) => item.id !== notice.id)]);
     } catch (e: any) { toast.show(e.message, "error"); }
+  };
+  const confirmDeleteNotice = (noticeId: string) => {
+    const deleteNotice = async () => {
+      try {
+        await api.delete("/owner/notices/" + encodeURIComponent(noticeId));
+        setNotices((current) => current.filter((notice) => notice.id !== noticeId));
+        toast.show("Notice deleted");
+        try {
+          const { notices } = await api.get<{ notices: any[] }>(`/owner/notices?hostel_id=${activeId}`);
+          setNotices(notices);
+        } catch (e: any) {
+          toast.show(e.message || "Notice deleted, but the list could not be refreshed", "error");
+        }
+      } catch (e: any) {
+        toast.show(e.message || "Could not delete notice", "error");
+      }
+    };
+    const message = "Are you sure you want to delete this notice?";
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(message)) void deleteNotice();
+    } else {
+      Alert.alert("Delete Notice", message, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => void deleteNotice() },
+      ]);
+    }
   };
   const openComplaints = async () => {
     const d = await api.get<{ complaints: any[]; requests: any[] }>(`/owner/complaints?hostel_id=${activeId}`);
@@ -100,17 +135,40 @@ export default function More() {
       toast.show(e.message || "Could not load subscription", "error");
     }
   };
-  const buyDuration = async (months: number) => {
-    setBuying(months);
+  const buyPlan = async (planId: string) => {
+    if (!activeId || buying) return;
+    const displayedPlan = sub?.plans?.find((plan: any) => plan.id === planId);
+    if (!displayedPlan || !displayedPlan.total_amount_paise || !displayedPlan.gst_rates?.length) {
+      toast.show("GST pricing for this plan is not configured. Ask the administrator to update it.", "error");
+      return;
+    }
+    setBuying(planId);
     try {
-      const res = await api.post<{ checkout_url: string; payment_link_id: string }>(
-        "/payments/subscription/link", { hostel_id: activeId, months }
+      const res = await api.post<{
+        checkout_url: string;
+        payment_link_id: string;
+        total_amount_paise: number;
+      }>(
+        "/payments/subscription/link", {
+          hostel_id: activeId,
+          plan_id: planId,
+          expected_base_price_paise: displayedPlan.base_price_paise,
+          expected_gst_rate: displayedPlan.gst_rate,
+          expected_gst_rates: displayedPlan.gst_rates,
+          expected_gst_amount_paise: displayedPlan.gst_amount_paise,
+          expected_total_amount_paise: displayedPlan.total_amount_paise,
+        }
       );
+      if (res.total_amount_paise !== displayedPlan.total_amount_paise) {
+        toast.show("Plan pricing changed. Refresh the plans and confirm the new total before paying.", "error");
+        await load();
+        return;
+      }
       await WebBrowser.openBrowserAsync(res.checkout_url);
       // poll for activation
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        const st = await api.get<{ activated: boolean }>(`/payments/subscription/status/${res.payment_link_id}`);
+        const st = await api.get<{ activated: boolean }>(`/payments/subscription/status/${encodeURIComponent(res.payment_link_id)}`);
         if (st.activated) {
           setPlanOpen(false);
           setCelebrate(true);
@@ -164,7 +222,11 @@ export default function More() {
             <T weight="extrabold" size={type.lg}>Reports</T>
             <Row style={{ gap: spacing.md }}>
               <MiniStat label="Collection" value={`₹${reports.total_collection}`} tone={colors.success} />
-              <MiniStat label="Expenses" value={`₹${reports.total_expenses}`} tone={colors.warning} />
+              <MiniStat label="PG / Property expenses" value={`₹${reports.total_expenses}`} tone={colors.warning} />
+            </Row>
+            <Row style={{ gap: spacing.md }}>
+              <MiniStat label="Personal (separate)" value={`₹${reports.personal_expenses || 0}`} tone={colors.info} />
+              <MiniStat label="Unclassified legacy expenses" value={`₹${reports.unclassified_expenses || 0}`} tone={colors.warning} />
             </Row>
             <Row style={{ gap: spacing.md }}>
               <MiniStat label="Net Profit" value={`₹${reports.net_profit}`} tone={reports.net_profit >= 0 ? colors.brand : colors.error} />
@@ -179,6 +241,8 @@ export default function More() {
                     <Row style={{ gap: spacing.md }}>
                       <T size={type.sm} color={colors.success}>+₹{m.collection}</T>
                       <T size={type.sm} color={colors.error}>-₹{m.expense}</T>
+                      {m.personal_expense ? <T size={type.sm} color={colors.info}>Personal ₹{m.personal_expense}</T> : null}
+                      {m.unclassified_expense ? <T size={type.sm} color={colors.warning}>Review ₹{m.unclassified_expense}</T> : null}
                     </Row>
                   </Row>
                 ))}
@@ -200,6 +264,18 @@ export default function More() {
         ) : null}
 
         <MenuItem icon="megaphone" title="Notices" subtitle="Post notices for tenants" onPress={openNotices} testID="menu-notices" />
+        <Pressable testID="menu-tenant-alerts" onPress={() => router.push("/(owner)/tenant-alerts" as any)}>
+          <Card style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+            <Ionicons name="notifications" size={22} color={colors.brand} />
+            <View style={{ flex: 1 }}>
+              <T weight="bold">Alerts & Notifications</T>
+              <T size={type.sm} color={colors.onSurfaceSecondary}>Payment approvals, tenant reports and status updates</T>
+            </View>
+            {pendingPaymentAlerts ? <Badge label={String(pendingPaymentAlerts)} tone="warning" /> : null}
+            <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
+          </Card>
+        </Pressable>
+        <MenuItem icon="document-text" title="Rules & Regulations" subtitle="Publish rules and track tenant acknowledgements" onPress={() => router.push("/(owner)/rules" as any)} testID="menu-rules" />
         <MenuItem icon="chatbubbles" title="Complaints & Requests" subtitle="View & resolve tenant issues" onPress={openComplaints} testID="menu-complaints" />
         <MenuItem icon="mail" title="Enquiries" subtitle="Leads from public listing" onPress={openEnquiries} testID="menu-enquiries" />
         <MenuItem icon="diamond" title="Subscription & Plans" subtitle="Free trial, upgrade & pricing" tint="#FEF3C7" onPress={openSub} testID="menu-upgrade" />
@@ -208,15 +284,12 @@ export default function More() {
       </ScrollView>
 
       {/* Notices sheet */}
-      <Sheet visible={noticesOpen} onClose={() => setNoticesOpen(false)} title="Notices">
+      <Sheet visible={noticesOpen} onClose={() => setNoticesOpen(false)} title="Notices" centered>
         <Field label="Title" value={nTitle} onChangeText={setNTitle} placeholder="e.g. Water supply off" autoCapitalize="sentences" testID="notice-title" />
         <Field label="Message" value={nBody} onChangeText={setNBody} placeholder="Details..." multiline autoCapitalize="sentences" testID="notice-body" />
         <Btn title="Post Notice" icon="megaphone" onPress={postNotice} testID="notice-post" />
         {notices.map((n) => (
-          <Card key={n.id} style={{ gap: 2 }}>
-            <T weight="bold">{n.title}</T>
-            <T size={type.sm} color={colors.onSurfaceSecondary}>{n.body}</T>
-          </Card>
+          <SwipeNoticeCard key={n.id} notice={n} onDelete={() => confirmDeleteNotice(n.id)} />
         ))}
       </Sheet>
 
@@ -283,11 +356,9 @@ export default function More() {
               )}
             </Card>
 
-            <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
-              <T weight="bold">{sub.slab_label}</T>
-              <Badge label={`${sub.bed_count} beds`} tone="brand" />
-            </Row>
-            <T size={type.sm} color={colors.onSurfaceSecondary}>Pricing is based on your hostel's total beds. Choose a duration:</T>
+            <T size={type.sm} color={colors.onSurfaceSecondary}>
+              Plan prices are managed by your administrator and shown before GST. Choose a plan to pay securely with Razorpay.
+            </T>
 
             {!sub.payments_enabled ? (
               <Card style={{ backgroundColor: colors.brandTertiary, borderColor: colors.brandSecondary }}>
@@ -300,23 +371,55 @@ export default function More() {
               </Card>
             ) : null}
 
-            {[
-              { m: 1, label: "Monthly" },
-              { m: 3, label: "3 Months" },
-              { m: 6, label: "6 Months" },
-              { m: 12, label: "12 Months" },
-            ].map((d) => (
-              <Card key={d.m} testID={`plan-${d.m}`} style={{ gap: spacing.sm }}>
+            {sub.plans?.length ? sub.plans.map((plan: any) => (
+              <Card key={plan.id} testID={`plan-${plan.id}`} style={{ gap: spacing.sm }}>
                 <Row style={{ justifyContent: "space-between", alignItems: "center" }}>
                   <View>
-                    <T weight="bold" size={type.lg}>{d.label}</T>
-                    {d.m >= 6 ? <T size={type.sm} color={colors.brand} weight="semibold">Best value</T> : null}
+                    <T weight="bold" size={type.lg}>{plan.name}</T>
+                    <T size={type.sm} color={colors.onSurfaceSecondary}>
+                      {plan.duration_months} month{plan.duration_months === 1 ? "" : "s"}
+                    </T>
                   </View>
-                  <T weight="extrabold" size={type.xl} color={colors.brand}>₹{sub.prices[String(d.m)] ?? sub.prices[d.m]}</T>
+                  <T weight="extrabold" size={type.xl} color={colors.brand}>
+                    {plan.total_amount == null ? "GST setup required" : `₹${Number(plan.total_amount).toFixed(2)}`}
+                  </T>
                 </Row>
-                <Btn title="Pay & Activate" icon="card" onPress={() => buyDuration(d.m)} loading={buying === d.m} testID={`buy-${d.m}`} />
+                <View style={{ gap: 3, padding: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.sm }}>
+                  <T size={type.sm} color={colors.onSurfaceSecondary}>
+                    Plan price (before GST): ₹{Number(plan.base_price ?? plan.price).toFixed(2)}
+                  </T>
+                  {plan.gst_rates?.length ? (
+                    <>
+                      <T size={type.sm} color={colors.onSurfaceSecondary}>
+                        GST ({plan.gst_rates.map((rate: number) => `${rate}%`).join(" + ")}): ₹{Number(plan.gst_amount).toFixed(2)}
+                      </T>
+                      <T weight="extrabold" color={colors.brand}>
+                        Total payable: ₹{Number(plan.total_amount).toFixed(2)}
+                      </T>
+                    </>
+                  ) : (
+                    <T size={type.sm} color={colors.warning}>
+                      Administrator must configure at least one GST rate before this plan can be purchased.
+                    </T>
+                  )}
+                </View>
+                {plan.features?.length ? (
+                  <T size={type.sm} color={colors.onSurfaceSecondary}>{plan.features.join(" · ")}</T>
+                ) : null}
+                <Btn
+                  title="Pay & Activate"
+                  icon="card"
+                  onPress={() => buyPlan(plan.id)}
+                  loading={buying === plan.id}
+                  disabled={buying !== null || !plan.gst_rates?.length || plan.total_amount_paise == null}
+                  testID={`buy-${plan.id}`}
+                />
               </Card>
-            ))}
+            )) : (
+              <Card>
+                <T color={colors.onSurfaceSecondary}>There are no active premium plans available right now.</T>
+              </Card>
+            )}
 
             {sub.history?.length ? (
               <>
@@ -343,7 +446,7 @@ export default function More() {
         )}
       </Sheet>
 
-      <HostelFormSheet visible={editOpen} onClose={() => setEditOpen(false)} initial={hostel} onSaved={async () => { setEditOpen(false); await refreshHostels(); load(); }} />
+      {editOpen ? <HostelFormSheet visible onClose={() => setEditOpen(false)} initial={hostel} onSaved={async () => { setEditOpen(false); await refreshHostels(); load(); }} /> : null}
 
       <CelebrationOverlay visible={celebrate} name={activeHostel?.name} planLabel={sub?.subscription?.plan} onClose={() => setCelebrate(false)} />
     </Screen>

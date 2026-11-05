@@ -131,11 +131,11 @@ Based on number of beds in hostel:
 ## 🔧 Configuration Steps
 
 ### Step 1: Environment Variables
-Your `.env` file is already configured with:
+Configure these values in your private, untracked `.env` file:
 ```env
-RAZORPAY_KEY_ID=rzp_test_TY5iBO5vYMtVyt
-RAZORPAY_KEY_SECRET=Y8r9260ZlRKTwIdYdYt5gzyc
-RAZORPAY_WEBHOOK_SECRET=whsec_xxxx_xxxxxxxx
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+RAZORPAY_WEBHOOK_SECRET=
 EXPO_PUBLIC_BACKEND_URL=http://localhost:8000
 ```
 
@@ -144,7 +144,7 @@ EXPO_PUBLIC_BACKEND_URL=http://localhost:8000
 2. Navigate to **Settings → Webhooks**
 3. Click **Add New Webhook**
 4. Enter these details:
-   - **Webhook URL**: `https://your-domain.com/api/razorpay/webhook`
+   - **Webhook URL**: `https://api.golivehostel360.com/api/razorpay/webhook`
    - **Events to listen to**: Check `payment_link.paid`
    - **Active**: ✅ Enable
 5. Copy the **Webhook Secret** (whsec_xxx)
@@ -296,26 +296,26 @@ if not hmac.compare_digest(expected, sig):
 #### Step 2: Update Environment
 ```env
 # OLD (sandbox)
-RAZORPAY_KEY_ID=rzp_test_TY5iBO5vYMtVyt
-RAZORPAY_KEY_SECRET=Y8r9260ZlRKTwIdYdYt5gzyc
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
 
 # NEW (production)
-RAZORPAY_KEY_ID=rzp_live_xxxxx
-RAZORPAY_KEY_SECRET=your_live_secret_here
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
 ```
 
 #### Step 3: Update Webhook URL
 1. In Razorpay Dashboard, go to **Settings** → **Webhooks**
 2. Update webhook URL to production domain:
    ```
-   https://hostel360.com/api/razorpay/webhook
+   https://api.golivehostel360.com/api/razorpay/webhook
    ```
 3. Update webhook secret if needed
 4. Re-generate and copy new `RAZORPAY_WEBHOOK_SECRET`
 
 #### Step 4: Update Backend Configuration
 ```env
-EXPO_PUBLIC_BACKEND_URL=https://hostel360.com
+EXPO_PUBLIC_BACKEND_URL=https://api.golivehostel360.com
 ```
 
 #### Step 5: Deploy & Test

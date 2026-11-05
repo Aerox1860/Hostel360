@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { T, Badge } from "@/src/components/ui";
+import { propertyTypeLabel } from "@/src/utils/propertyType";
 import { colors, spacing, radius, shadow, type } from "@/src/theme";
 
 export interface Hostel {
@@ -12,6 +13,7 @@ export interface Hostel {
   city?: string;
   area?: string;
   gender?: string;
+  property_type?: string;
   photos?: string[];
   amenities?: string[];
   min_rent?: number | null;
@@ -95,7 +97,10 @@ export function HostelCard({
       <View style={{ padding: spacing.md, gap: spacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <View style={{ flexDirection: "row", gap: spacing.sm, alignItems: "center" }}>
-            <Badge label={genderLabel[hostel.gender || "pg"] || "PG"} tone="brand" />
+            <View style={{ gap: 4 }}>
+              <Badge label={propertyTypeLabel(hostel.property_type)} tone="brand" />
+              <Badge label={genderLabel[hostel.gender || "pg"] || "PG"} tone="neutral" />
+            </View>
             {hostel.rating ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
                 <Ionicons name="star" size={13} color={colors.warning} />
