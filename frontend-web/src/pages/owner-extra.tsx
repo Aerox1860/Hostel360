@@ -185,12 +185,12 @@ export function OwnerRegistrationPage() {
   return <Page title="Tenant registration" subtitle={`${activeHostel?.name || "Selected hostel"} · QR links and applications`}>
     <ErrorBox error={error} />
     <div className="row"><Button kind="secondary" onClick={() => void load()} disabled={loading}>{loading ? "Refreshing…" : "Refresh registration and applications"}</Button></div>
-    <Card className="stack"><h2>Registration QR</h2><p>Create a secure registration link for prospective tenants. Generating a new QR revokes the previous one.</p>
+    <Card className="stack"><h2>Registration QR</h2><p>Each hostel has one saved registration QR. Generate displays the existing QR when available; revoke it explicitly before creating a replacement.</p>
       {registration ? <>
         <img className="registration-qr" src={registration.qr_data_uri} alt={`Tenant registration QR for ${activeHostel?.name || "hostel"}`} />
         <p className="small">{registration.registration_url}</p><p className="muted small">Expires {registration.expires_at ? new Date(registration.expires_at).toLocaleString() : "according to current policy"}</p>
         <div className="row"><Button kind="secondary" onClick={() => void copyLink()}>Copy link</Button><Button kind="secondary" onClick={() => void shareLink()}>Share link</Button><a className="button secondary" href={registration.qr_data_uri} download="hostel360-tenant-registration.png">Download QR</a><Button kind="secondary" onClick={printQr}>Print</Button><Button kind="danger" onClick={() => void qrAction("revoke")} disabled={!!busy}>Revoke QR</Button></div>
-      </> : <Button onClick={() => void qrAction("generate")} disabled={!!busy}>{busy === "generate" ? "Generating…" : "Generate QR code"}</Button>}
+      </> : <Button onClick={() => void qrAction("generate")} disabled={loading || !!busy}>{loading ? "Checking saved QR…" : busy === "generate" ? "Generating…" : "Generate QR code"}</Button>}
     </Card>
     <Card className="stack"><h2>Tenant applications ({applications.length})</h2>{applications.map((application) => <article className="card stack" key={application.id}>
       <div className="spread"><b>{application.name}</b><span className="badge">{application.status}</span></div>

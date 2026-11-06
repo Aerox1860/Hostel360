@@ -32,14 +32,15 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
   return <section className={`card ${className}`}>{children}</section>;
 }
 
-export function Page({ title, subtitle, children, actions }: {
+export function Page({ title, subtitle, children, actions, className = "" }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   actions?: ReactNode;
+  className?: string;
 }) {
   return (
-    <main className="page">
+    <main className={`page ${className}`.trim()}>
       <header className="page-heading">
         <div><h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>
         {actions && <div className="page-actions">{actions}</div>}
@@ -179,6 +180,21 @@ function AdminNavigationIcon({ path }: { path: string }) {
   return <svg className="admin-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icon}</svg>;
 }
 
+function OwnerNavigationIcon({ path }: { path: string }) {
+  const icon = {
+    "/owner": <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
+    "/owner/rooms": <><path d="M3 19v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5M3 16h18M6 12V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4" /></>,
+    "/owner/tenants": <><circle cx="9" cy="8" r="3" /><path d="M3.5 20v-1.5a5.5 5.5 0 0 1 11 0V20zM16 5.5a3 3 0 0 1 0 5.8M17 14a4.5 4.5 0 0 1 3.5 4.4V20h-3" /></>,
+    "/owner/money": <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 9h18M8 14h3" /><circle cx="16" cy="14" r="2" /></>,
+    "/owner/more": <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
+    "/owner/referrals": <><path d="M12 3 14.5 8.5 20.5 9.2l-4.4 4.1 1.1 6-5.2-2.9-5.2 2.9 1.1-6-4.4-4.1 6-.7z" /><path d="M19 3v4m-2-2h4" /></>,
+    "/owner/tenant-registration": <><path d="M7 3.5h8l4 4V20H7zM15 3.5V8h4M10 12h6m-6 3h6" /><path d="M4 7v14h12" /></>,
+    "/owner/tenant-alerts": <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
+    "/owner/rules": <><path d="M6 4h13v16H6zM9 8h7m-7 4h7m-7 4h4" /><path d="M4 7v13" /></>,
+  }[path];
+  return <svg className="owner-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icon}</svg>;
+}
+
 export function ProtectedLayout({ role }: { role: User["role"] }) {
   const { user, loading, logout } = useAuth();
   const location = useLocation();
@@ -190,7 +206,7 @@ export function ProtectedLayout({ role }: { role: User["role"] }) {
   if (user.role !== role) return <Navigate to={user.role === "admin" ? "/admin" : user.role === "owner" ? "/owner" : "/tenant"} replace />;
 
   return (
-    <div className={`app-shell${role === "admin" ? " app-shell-admin" : ""}`}>
+    <div className={`app-shell${role === "admin" ? " app-shell-admin" : ""}${role === "owner" ? " app-shell-owner" : ""}${role === "owner" && location.pathname === "/owner" ? " app-shell-owner-dashboard" : ""}`}>
       <header className="topbar">
         <div className="topbar-brand"><button className="mobile-menu-toggle" type="button" aria-label={navigationOpen ? "Close navigation" : "Open navigation"} aria-expanded={navigationOpen} aria-controls="primary-navigation" onClick={() => setNavigationOpen((open) => !open)}><span /><span /><span /></button><Brand /></div>
         <div className="account-chip"><span className="account-name">{user.name || user.email}</span><Button kind="ghost" onClick={logout}>Log out</Button></div>
@@ -201,16 +217,22 @@ export function ProtectedLayout({ role }: { role: User["role"] }) {
           {role === "admin" && <div className="admin-sidebar-brand"><Brand /></div>}
           <div className="sidebar-profile"><b>{user.name || user.email}</b><span>{role === "admin" ? "Administrator" : role === "owner" ? "Hostel owner" : "Tenant"}</span></div>
           <nav id="primary-navigation" aria-label={`${role} navigation`}>
-            {menus[role].map((item) => <Link key={item.path} className={`${location.pathname === item.path || (item.path !== `/${role}` && location.pathname.startsWith(`${item.path}/`)) ? "active" : ""}${role === "admin" ? " admin-nav-link" : ""}`} to={item.path}>{role === "admin" && <AdminNavigationIcon path={item.path} />}{item.label}</Link>)}
+            {menus[role].map((item) => <Link key={item.path} className={`${location.pathname === item.path || (item.path !== `/${role}` && location.pathname.startsWith(`${item.path}/`)) ? "active" : ""}${role === "admin" ? " admin-nav-link" : ""}`} to={item.path}>{role === "admin" ? <AdminNavigationIcon path={item.path} /> : role === "owner" ? <OwnerNavigationIcon path={item.path} /> : null}{item.label}</Link>)}
             {role === "owner" && <>
-              <Link className={location.pathname === "/owner/tenant-registration" ? "active" : ""} to="/owner/tenant-registration">Tenant registration</Link>
-              <Link className={location.pathname === "/owner/tenant-alerts" ? "active" : ""} to="/owner/tenant-alerts">Alerts</Link>
-              <Link className={location.pathname === "/owner/rules" ? "active" : ""} to="/owner/rules">Rules & Regulations</Link>
+              <Link className={location.pathname === "/owner/tenant-registration" ? "active" : ""} to="/owner/tenant-registration"><OwnerNavigationIcon path="/owner/tenant-registration" />Tenant Registration</Link>
+              <Link className={location.pathname === "/owner/tenant-alerts" ? "active" : ""} to="/owner/tenant-alerts"><OwnerNavigationIcon path="/owner/tenant-alerts" />Alerts</Link>
+              <Link className={location.pathname === "/owner/rules" ? "active" : ""} to="/owner/rules"><OwnerNavigationIcon path="/owner/rules" />Rules & Regulations</Link>
             </>}
             {role === "tenant" && <>
               <Link className={location.pathname === "/tenant/policy-review" ? "active" : ""} to="/tenant/policy-review">Rules review</Link>
             </>}
           </nav>
+          {role === "owner" && <Link className="owner-upgrade-card" to="/owner/more">
+            <span className="owner-upgrade-crown"><OwnerNavigationIcon path="/owner/referrals" /></span>
+            <strong>Upgrade to Premium</strong>
+            <span className="owner-upgrade-copy">Explore plans and subscription benefits.</span>
+            <span className="owner-upgrade-action">View Plans <span aria-hidden="true">→</span></span>
+          </Link>}
           <button className="sidebar-logout" onClick={logout}>Log out</button>
         </aside>
         <div className="workspace-content"><Outlet /></div>

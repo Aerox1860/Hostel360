@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../api";
 import { AdvertisementSlot } from "../ads";
@@ -139,11 +139,13 @@ function useHostelData<T>(path: string, initial: T) {
 }
 
 export function OwnerDashboardPage() {
-  const { activeId, activeHostel, hostels, error: hostelError, loading: hostelsLoading, refresh } = useOwnerHostel();
+  const { activeId, activeHostel, hostels, error: hostelError, loading: hostelsLoading, refresh, setActiveId } = useOwnerHostel();
   const dashboard = useHostelData<Record<string, any>>("/owner/dashboard", {});
+  const reports = useHostelData<{ monthly?: { month: string; collection: number; expense: number; profit: number }[] }>("/owner/reports", {});
   const [portfolio, setPortfolio] = useState<Record<string, any> | null>(null);
   const [portfolioError, setPortfolioError] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showAllProperties, setShowAllProperties] = useState(false);
   const [editHostel, setEditHostel] = useState<Record<string, any> | undefined>();
   const loadPortfolio = useCallback(async () => {
     try { setPortfolio(await api.get<Record<string, any>>("/owner/portfolio")); setPortfolioError(""); }
@@ -162,32 +164,143 @@ export function OwnerDashboardPage() {
       const result = await api.get<{ hostel: Record<string, any> }>(`/owner/hostel?hostel_id=${encodeURIComponent(activeId)}`);
       setEditHostel(result.hostel); setShowForm(true);
     } catch (reason) { dashboard.setError(reason instanceof Error ? reason.message : "Could not load hostel details."); }
-  }}>Edit Hostel</Button></>}>
-    <OwnerError value={dashboard.error || portfolioError} />
+  }}>Edit Hostel</Button></>} className="owner-dashboard-page">
+    <OwnerError value={dashboard.error || reports.error || portfolioError} />
     <AdvertisementSlot />
     {dashboard.loading ? <p className="muted">Loading dashboard…</p> : <div className="stack">
-      {dashboard.data.hostel_status && <Card><span className={`badge ${dashboard.data.hostel_status === "approved" ? "success" : "warning"}`}>{dashboard.data.hostel_status === "approved" ? "Live" : dashboard.data.hostel_status}</span><p className="muted">Listing status</p></Card>}
-      {dashboard.data.subscription && <Card className="spread"><div><b>Subscription</b><p>{dashboard.data.subscription.status} · {dashboard.data.subscription.days_left} days left</p></div><Link className="button secondary" to="/owner/more">Manage</Link></Card>}
-      <div className="grid">
+      <div className="owner-summary-grid">
+        {dashboard.data.hostel_status && <Card className="owner-summary-card owner-summary-card--pink">
+          <OwnerDashboardIcon name="listing" />
+          <div className="owner-summary-content"><span className="owner-summary-label">Listing Status</span><span className={`badge ${dashboard.data.hostel_status === "approved" ? "success" : "warning"}`}>{dashboard.data.hostel_status === "approved" ? "Live" : dashboard.data.hostel_status}</span></div>
+        </Card>}
+        {dashboard.data.subscription && <Card className="owner-summary-card owner-summary-card--blue">
+          <OwnerDashboardIcon name="subscription" />
+          <div className="owner-summary-content"><span className="owner-summary-label">Subscription</span><strong className="owner-summary-value">{dashboard.data.subscription.status}</strong><span className="owner-summary-detail">{dashboard.data.subscription.days_left} days left</span></div>
+          <Link className="owner-summary-manage" to="/owner/more">Manage</Link>
+        </Card>}
         {[
-          ["Monthly Collection", dashboard.data.monthly_collection],
-          ["Expenses", dashboard.data.monthly_expenses],
-          ["Net Profit", dashboard.data.net_profit],
-          ["Occupancy", `${dashboard.data.occupancy_pct ?? 0}%`],
-          ["Rooms", dashboard.data.total_rooms],
-          ["Tenants", dashboard.data.total_tenants],
-          ["Vacant Beds", dashboard.data.available_beds],
-          ["Pending Payments", dashboard.data.pending_payments],
-        ].map(([label, value]) => <Card key={String(label)}><span className="muted">{label}</span><div className="stat">{value === undefined ? "—" : typeof value === "number" && String(label).includes("Collection") || String(label).includes("Expenses") ? `₹${value}` : value}</div></Card>)}
+          ["Monthly Collection", dashboard.data.monthly_collection, "green", "collection", true],
+          ["Expenses", dashboard.data.monthly_expenses, "orange", "expenses", true],
+          ["Net Profit", dashboard.data.monthly_profit, "purple", "profit", true],
+          ["Occupancy", `${dashboard.data.occupancy_pct ?? 0}%`, "sky", "occupancy"],
+          ["Rooms", dashboard.data.total_rooms, "lavender", "rooms"],
+          ["Tenants", dashboard.data.total_tenants, "pink", "tenants"],
+          ["Vacant Beds", dashboard.data.available_beds, "teal", "vacant"],
+          ["Pending Payments", dashboard.data.pending_payments, "amber", "payments"],
+        ].map(([label, value, tone, icon, isMoney]) => <Card key={String(label)} className={`owner-summary-card owner-summary-card--${tone}`}>
+          <OwnerDashboardIcon name={String(icon)} />
+          <div className="owner-summary-content"><span className="owner-summary-label">{label}</span><strong className="owner-summary-value">{value === undefined ? "—" : isMoney ? `₹${value}` : value}</strong></div>
+        </Card>)}
       </div>
-      {portfolio && portfolio.total_hostels > 1 && <Card className="stack"><h2>All Properties</h2><p>{portfolio.total_hostels} hostels · {portfolio.total_tenants} tenants · {portfolio.total_beds} beds</p><p>Net profit ₹{portfolio.net_profit} · Occupancy {portfolio.occupancy_pct}%</p><p>Collected ₹{portfolio.total_collection} · Spent ₹{portfolio.total_expenses}</p><p>Personal expenses (separate): ₹{portfolio.personal_expenses || 0}</p><p>Unclassified legacy expenses: ₹{portfolio.unclassified_expenses || 0}</p></Card>}
-      <Card><h2>Quick actions</h2><div className="row">{[
-        ["Rooms & Beds", "/owner/rooms"], ["Tenants", "/owner/tenants"], ["Rent & Expenses", "/owner/money"],
-        ["More", "/owner/more"], ["Tenant registration", "/owner/tenant-registration"], ["Rules", "/owner/rules"],
-      ].map(([label, path]) => <Link className="button secondary" key={path} to={path}>{label}</Link>)}</div></Card>
+      <div className="owner-overview-grid">
+        <Card className="owner-properties-card">
+          <div className="owner-panel-heading">
+            <div className="owner-panel-title"><span className="owner-panel-icon"><OwnerDashboardIcon name="property" /></span><div><h2>All Properties</h2><p>{portfolio ? `${portfolio.total_hostels} hostels · ${portfolio.total_tenants} tenants · ${portfolio.total_beds} beds` : "Your hostel portfolio"}</p></div></div>
+            {(portfolio?.per_hostel?.length || 0) > 3 && <button className="owner-view-all" type="button" onClick={() => setShowAllProperties((current) => !current)}>{showAllProperties ? "Show Less" : "View All Properties"} <span aria-hidden="true">{showAllProperties ? "↑" : "→"}</span></button>}
+          </div>
+          {portfolio?.per_hostel?.length ? <div className="owner-property-list">
+            {(showAllProperties ? portfolio.per_hostel : portfolio.per_hostel.slice(0, 3)).map((property: Record<string, any>) => {
+              const hostel = hostels.find((item) => item.id === property.id);
+              const selected = property.id === activeId;
+              return <button className={`owner-property-row${selected ? " is-selected" : ""}`} type="button" key={property.id} onClick={() => setActiveId(property.id)} aria-current={selected ? "true" : undefined}>
+                <span className="owner-property-mark"><OwnerDashboardIcon name="property" /></span>
+                <span className="owner-property-main"><strong>{property.name}</strong><span>{[hostel?.area, hostel?.city].filter(Boolean).join(", ") || "Hostel property"}</span></span>
+                <span className={`badge ${property.status === "approved" ? "success" : property.status ? "warning" : ""}`}>{property.status === "approved" ? "Live" : property.status || "—"}</span>
+                <span className="owner-property-stats"><span><b>{property.beds}</b> beds</span><span><b>{property.tenants}</b> tenants</span><span><b>{property.occupancy_pct}%</b> occupied</span></span>
+              </button>;
+            })}
+          </div> : <div className="owner-property-empty"><span className="owner-property-mark"><OwnerDashboardIcon name="property" /></span><div><strong>{activeHostel?.name || "Your hostel"}</strong><span>{[activeHostel?.area, activeHostel?.city].filter(Boolean).join(", ") || activeHostel?.address || "Property details"}</span></div><span className="badge">{dashboard.data.hostel_status || "—"}</span></div>}
+          {portfolio && <div className="owner-portfolio-totals">
+            <div><span>Total collection</span><strong>₹{portfolio.total_collection ?? "—"}</strong></div>
+            <div><span>Expenses</span><strong>₹{portfolio.total_expenses ?? "—"}</strong></div>
+            <div><span>Net profit</span><strong>₹{portfolio.net_profit ?? "—"}</strong></div>
+            <div><span>Occupancy</span><strong>{portfolio.occupancy_pct ?? "—"}%</strong></div>
+            {portfolio.personal_expenses != null && <div><span>Personal expenses</span><strong>₹{portfolio.personal_expenses}</strong></div>}
+            {portfolio.unclassified_expenses != null && <div><span>Unclassified expenses</span><strong>₹{portfolio.unclassified_expenses}</strong></div>}
+          </div>}
+        </Card>
+        <OwnerCollectionChart monthly={reports.data.monthly || []} loading={reports.loading} />
+      </div>
+      <Card className="owner-quick-actions">
+        <div className="owner-section-heading"><span className="owner-section-icon"><OwnerDashboardIcon name="actions" /></span><h2>Quick Actions</h2></div>
+        <div className="owner-action-grid">{[
+          ["Rooms & Beds", "/owner/rooms", "rooms", "Add, edit and manage rooms and beds"],
+          ["Tenants", "/owner/tenants", "tenants", "View and manage tenants"],
+          ["Rent & Expenses", "/owner/money", "collection", "Record rent, expenses and reports"],
+          ["Tenant registration", "/owner/tenant-registration", "registration", "Register and allocate tenants"],
+          ["Rules", "/owner/rules", "rules", "Manage hostel rules and regulations"],
+          ["More", "/owner/more", "more", "Additional tools and settings"],
+        ].map(([label, path, icon, description]) => <Link className="owner-action-link" key={path} to={path}>
+          <span className={`owner-action-icon owner-action-icon--${icon}`}><OwnerDashboardIcon name={String(icon)} /></span>
+          <span className="owner-action-copy"><strong>{label}</strong><small>{description}</small></span>
+          <span className="owner-action-arrow" aria-hidden="true">→</span>
+        </Link>)}</div>
+      </Card>
     </div>}
     {showForm && <div className="modal-backdrop"><section className="modal"><PropertyForm initial={editHostel} onDone={() => { setShowForm(false); setEditHostel(undefined); void refresh(); void dashboard.load(); }} /></section></div>}
   </Page>;
+}
+
+function OwnerCollectionChart({ monthly, loading }: {
+  monthly: { month: string; collection: number; expense: number; profit: number }[];
+  loading: boolean;
+}) {
+  const values = monthly.map((item) => Number(item.collection)).filter(Number.isFinite);
+  const maximum = Math.max(...values, 0);
+  const points = monthly.map((item, index) => {
+    const x = monthly.length < 2 ? 300 : 34 + (index * 532) / (monthly.length - 1);
+    const value = Number(item.collection);
+    const y = maximum > 0 && Number.isFinite(value) ? 164 - (Math.max(0, value) / maximum) * 126 : 164;
+    return { x, y, item, value };
+  });
+  const line = points.map(({ x, y }) => `${x},${y}`).join(" ");
+  const area = points.length ? `34,164 ${line} ${points[points.length - 1].x},164` : "";
+  const latest = [...monthly].reverse().find((item) => Number.isFinite(Number(item.collection)));
+
+  return <Card className="owner-collection-card">
+    <div className="owner-panel-heading">
+      <div className="owner-panel-title"><span className="owner-panel-icon owner-panel-icon--chart"><OwnerDashboardIcon name="collection" /></span><div><h2>Monthly Collection</h2><p>Last 6 months</p></div></div>
+    </div>
+    <strong className="owner-chart-total">{latest ? `₹${latest.collection}` : "—"}</strong>
+    {loading ? <p className="muted small">Loading collection history…</p> : monthly.length ? <>
+      <div className="owner-chart-wrap">
+        <svg className="owner-collection-chart" viewBox="0 0 600 205" role="img" aria-label="Monthly collection for the last six months">
+          {[38, 80, 122, 164].map((y) => <line key={y} x1="34" y1={y} x2="566" y2={y} className="owner-chart-gridline" />)}
+          <polygon points={area} className="owner-chart-area" />
+          <polyline points={line} className="owner-chart-line" />
+          {points.map(({ x, y, item }) => <circle key={item.month} cx={x} cy={y} r="4" className="owner-chart-dot"><title>{`${item.month}: ₹${item.collection}`}</title></circle>)}
+        </svg>
+        <div className="owner-chart-months">{monthly.map((item) => <span key={item.month}>{formatMonthLabel(item.month)}</span>)}</div>
+      </div>
+      <div className="owner-chart-legend"><span><i />Collection</span><span>Monthly values from recorded payments</span></div>
+    </> : <p className="owner-chart-empty">No collection history is available yet.</p>}
+  </Card>;
+}
+
+function formatMonthLabel(month: string) {
+  const date = new Date(`${month}-01T00:00:00`);
+  return Number.isNaN(date.getTime()) ? month : date.toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+}
+
+function OwnerDashboardIcon({ name }: { name: string }) {
+  const icons: Record<string, ReactNode> = {
+    property: <><path d="M3 20.5h18M5 20.5V8l7-4 7 4v12.5M9 20.5v-5h6v5M8 10h.01M16 10h.01M8 13h.01M16 13h.01" /></>,
+    listing: <><path d="M5 12.5 9.5 17 19 7.5" /><path d="M12 3.5 14.2 5l2.7-.1.9 2.5 2.2 1.6-.9 2.5.5 2.7-2.3 1.4-1.2 2.5-2.7-.4L11 19l-2.2-1.5-2.7.1-.9-2.5L3 13.5l.9-2.5-.5-2.7 2.3-1.4L7 4.4l2.7.4z" /></>,
+    subscription: <><path d="M4 7.5h16v12H4z" /><path d="M4 11h16M8 4.5v3M16 4.5v3M8 15h3" /></>,
+    collection: <><path d="M4 19V9m5 10V5m5 14v-7m5 7V3" /><path d="M2.5 19.5h19" /></>,
+    expenses: <><path d="M4 5h16v14H4z" /><path d="M8 9h8M8 12h5M8 15h3" /><path d="m16 14 2 2" /></>,
+    profit: <><path d="M4 18 9 13l3 3 8-9" /><path d="M14 7h6v6" /></>,
+    occupancy: <><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z" /><path d="M15 3.8v5.7h5.7A8.5 8.5 0 0 0 15 3.8Z" /></>,
+    rooms: <><path d="M4 20V4h16v16M4 9h16M9 4v5m6-5v5M9 13h2v2H9zm5 0h2v2h-2zM9 17h2v3H9zm5 0h2v3h-2z" /></>,
+    tenants: <><circle cx="9" cy="8" r="3" /><path d="M3.5 20v-1.5a5.5 5.5 0 0 1 11 0V20zM16 5.5a3 3 0 0 1 0 5.8M17 14a4.5 4.5 0 0 1 3.5 4.4V20h-3" /></>,
+    vacant: <><path d="M4 20V5l8-2 8 2v15M4 11h16M9 11v9m6-9v9" /><path d="m9 7 2 2 4-4" /></>,
+    payments: <><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5c-.6-.8-1.6-1.2-3-1.2-1.6 0-2.7.8-2.7 2s1 1.8 2.8 2.2 2.8 1 2.8 2.2-1.1 2.1-2.9 2.1c-1.4 0-2.6-.5-3.3-1.5M12.5 5.8v12.4" /></>,
+    actions: <><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5z" /><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></>,
+    more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
+    registration: <><path d="M7 3.5h8l4 4V20H7zM15 3.5V8h4M10 12h6m-6 3h6" /><path d="M4 7v14h12" /></>,
+    rules: <><path d="M6 4h13v16H6zM9 8h7m-7 4h7m-7 4h4" /><path d="M4 7v13" /></>,
+  };
+  return <svg className="owner-dashboard-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icons[name] || icons.more}</svg>;
 }
 
 export function OwnerRoomsPage() {
