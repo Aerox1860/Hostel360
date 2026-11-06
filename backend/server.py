@@ -6823,7 +6823,7 @@ async def _ensure_tenant_registration_indexes():
     await db.tenant_application_rate_limits.create_index(
         "expires_at",
         expireAfterSeconds=0,
-        name="tenant_application_rate_limit_ttl",
+        name="tenant_application_rate_expiry",
     )
     await db.tenants.create_index(
         "tenant_application_id",
