@@ -6798,7 +6798,7 @@ async def _ensure_tenant_registration_indexes():
         "hostel_id",
         unique=True,
         partialFilterExpression={"active": True},
-        name="tenant_registration_one_active_per_hostel",
+        name="tenant_registration_active_hostel_unique",
     )
     await db.tenant_applications.create_index(
         "id",
